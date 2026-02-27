@@ -1,0 +1,242 @@
+#!/bin/bash
+# OOB Console Hub - Ubuntu Host Setup Script
+# Run as root on a fresh Ubuntu 22.04/24.04 server
+#
+# Usage: sudo bash host-setup.sh
+#
+# This script:
+#   1. Creates a locked-down admin user for host management
+#   2. Installs Docker + Docker Compose
+#   3. Configures nftables firewall
+#   4. Applies SSH hardening
+#   5. Clones and prepares the OOB hub
+
+set -euo pipefail
+
+# --- Configuration ---
+HOST_ADMIN_USER="${HOST_ADMIN_USER:-oobadmin}"
+OOB_SSH_PORT="${OOB_SSH_PORT:-2222}"
+HOST_SSH_PORT="${HOST_SSH_PORT:-22}"
+INSTALL_DIR="/opt/pots"
+REPO_URL="https://github.com/gbm-dev/pots.git"
+
+echo "=============================================="
+echo "  OOB Console Hub - Host Setup"
+echo "=============================================="
+echo ""
+
+# --- Must be root ---
+if [[ $EUID -ne 0 ]]; then
+    echo "ERROR: Run this script as root (sudo bash host-setup.sh)"
+    exit 1
+fi
+
+# --- 1. Create host admin user ---
+echo "[1/5] Creating host admin user '${HOST_ADMIN_USER}'..."
+
+if id "$HOST_ADMIN_USER" &>/dev/null; then
+    echo "  User '${HOST_ADMIN_USER}' already exists, skipping."
+else
+    adduser --disabled-password --gecos "OOB Host Admin" "$HOST_ADMIN_USER"
+    usermod -aG sudo "$HOST_ADMIN_USER"
+    echo "  Created user '${HOST_ADMIN_USER}' with sudo access."
+    echo ""
+    echo "  >>> Set a password now:"
+    passwd "$HOST_ADMIN_USER"
+fi
+
+# Set up SSH key auth directory
+mkdir -p "/home/${HOST_ADMIN_USER}/.ssh"
+chmod 700 "/home/${HOST_ADMIN_USER}/.ssh"
+touch "/home/${HOST_ADMIN_USER}/.ssh/authorized_keys"
+chmod 600 "/home/${HOST_ADMIN_USER}/.ssh/authorized_keys"
+chown -R "${HOST_ADMIN_USER}:${HOST_ADMIN_USER}" "/home/${HOST_ADMIN_USER}/.ssh"
+
+echo "  Add your SSH public key to: /home/${HOST_ADMIN_USER}/.ssh/authorized_keys"
+echo ""
+
+# --- 2. Install Docker ---
+echo "[2/5] Installing Docker..."
+
+if command -v docker &>/dev/null; then
+    echo "  Docker already installed: $(docker --version)"
+else
+    apt-get update
+    apt-get install -y ca-certificates curl gnupg
+
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+        gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
+
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+        https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+        tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+    apt-get update
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+    systemctl enable docker
+    systemctl start docker
+    echo "  Docker installed."
+fi
+
+# Add admin user to docker group
+usermod -aG docker "$HOST_ADMIN_USER"
+echo "  Added '${HOST_ADMIN_USER}' to docker group."
+
+# --- 3. SSH Hardening ---
+echo "[3/5] Hardening SSH..."
+
+cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%s)
+
+cat > /etc/ssh/sshd_config.d/hardening.conf <<SSHEOF
+# OOB Host SSH Hardening
+Port ${HOST_SSH_PORT}
+PermitRootLogin no
+PasswordAuthentication no
+PubkeyAuthentication yes
+AuthenticationMethods publickey
+MaxAuthTries 3
+MaxSessions 3
+LoginGraceTime 30
+ClientAliveInterval 300
+ClientAliveCountMax 2
+X11Forwarding no
+AllowTcpForwarding no
+AllowAgentForwarding no
+PermitEmptyPasswords no
+
+# Only allow the host admin user to SSH to the host
+AllowUsers ${HOST_ADMIN_USER}
+SSHEOF
+
+# Validate config before restarting
+if sshd -t 2>/dev/null; then
+    systemctl restart sshd
+    echo "  SSH hardened. Key-only auth for '${HOST_ADMIN_USER}' on port ${HOST_SSH_PORT}."
+else
+    echo "  WARNING: sshd config test failed. Reverting."
+    rm /etc/ssh/sshd_config.d/hardening.conf
+fi
+
+echo ""
+echo "  !!! IMPORTANT: Before logging out, ensure you can SSH in with your key !!!"
+echo "  !!! Test in another terminal: ssh ${HOST_ADMIN_USER}@<this-ip> -p ${HOST_SSH_PORT} !!!"
+echo ""
+
+# --- 4. Firewall (nftables) ---
+echo "[4/5] Configuring nftables firewall..."
+
+apt-get install -y nftables
+
+cat > /etc/nftables.conf <<NFTEOF
+#!/usr/sbin/nft -f
+
+flush ruleset
+
+table inet filter {
+    chain input {
+        type filter hook input priority 0; policy drop;
+
+        # Loopback
+        iif lo accept
+
+        # Established/related connections
+        ct state established,related accept
+
+        # ICMP (ping)
+        ip protocol icmp accept
+        ip6 nexthdr icmpv6 accept
+
+        # Host SSH (admin access)
+        tcp dport ${HOST_SSH_PORT} ct state new accept
+
+        # OOB SSH (container, for admins to reach the TUI menu)
+        tcp dport ${OOB_SSH_PORT} ct state new accept
+
+        # SIP signaling (Telnyx)
+        udp dport 5060 accept
+
+        # RTP media range (Telnyx voice/modem)
+        udp dport 10000-10100 accept
+
+        # Log and drop everything else
+        counter drop
+    }
+
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+
+        # Allow Docker container traffic
+        ct state established,related accept
+
+        # Allow forwarding to/from Docker networks
+        iifname "docker*" accept
+        oifname "docker*" accept
+        iifname "br-*" accept
+        oifname "br-*" accept
+    }
+
+    chain output {
+        type filter hook output priority 0; policy accept;
+    }
+}
+NFTEOF
+
+systemctl enable nftables
+nft -f /etc/nftables.conf
+echo "  nftables configured. Open ports: ${HOST_SSH_PORT}/tcp (host SSH), ${OOB_SSH_PORT}/tcp (OOB), 5060/udp (SIP), 10000-10100/udp (RTP)"
+
+# --- 5. Clone and prepare OOB hub ---
+echo "[5/5] Setting up OOB Console Hub..."
+
+if [[ -d "$INSTALL_DIR" ]]; then
+    echo "  ${INSTALL_DIR} already exists. Pulling latest..."
+    cd "$INSTALL_DIR"
+    git pull
+else
+    git clone "$REPO_URL" "$INSTALL_DIR"
+    cd "$INSTALL_DIR"
+fi
+
+# Create .env if it doesn't exist
+if [[ ! -f .env ]]; then
+    cp .env.example .env
+    echo ""
+    echo "  >>> Edit your Telnyx credentials:"
+    echo "  >>> nano ${INSTALL_DIR}/.env"
+fi
+
+# Set ownership
+chown -R "${HOST_ADMIN_USER}:${HOST_ADMIN_USER}" "$INSTALL_DIR"
+
+echo ""
+echo "=============================================="
+echo "  Setup Complete!"
+echo "=============================================="
+echo ""
+echo "  Next steps:"
+echo ""
+echo "  1. Add your SSH public key:"
+echo "     /home/${HOST_ADMIN_USER}/.ssh/authorized_keys"
+echo ""
+echo "  2. TEST host SSH access in another terminal before logging out:"
+echo "     ssh ${HOST_ADMIN_USER}@<server-ip> -p ${HOST_SSH_PORT}"
+echo ""
+echo "  3. Edit Telnyx credentials:"
+echo "     nano ${INSTALL_DIR}/.env"
+echo ""
+echo "  4. Add your remote sites:"
+echo "     nano ${INSTALL_DIR}/config/oob-sites.conf"
+echo ""
+echo "  5. Build and start the container:"
+echo "     cd ${INSTALL_DIR}"
+echo "     docker compose build"
+echo "     docker compose up -d"
+echo ""
+echo "  6. Admins connect to the OOB menu:"
+echo "     ssh oob@<server-ip> -p ${OOB_SSH_PORT}"
+echo ""
+echo "  Firewall: host SSH(:${HOST_SSH_PORT}), OOB(:${OOB_SSH_PORT}), SIP(:5060/udp), RTP(:10000-10100/udp)"
+echo ""
