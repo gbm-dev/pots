@@ -1,0 +1,239 @@
+#!/bin/bash
+# OOB Console Hub - User Management
+# Run from the HOST to manage users inside the container.
+#
+# Usage:
+#   oob-user-manage add <username>         Create user with temp password, forced change on next login
+#   oob-user-manage remove <username>       Remove a user
+#   oob-user-manage reset <username>        Reset password (new temp, forced change)
+#   oob-user-manage list                    List all OOB users
+#   oob-user-manage lock <username>         Lock a user account
+#   oob-user-manage unlock <username>       Unlock a user account
+
+set -euo pipefail
+
+CONTAINER="oob-console-hub"
+DATA_DIR="/data/users"
+
+usage() {
+    echo "OOB Console Hub - User Management"
+    echo ""
+    echo "Usage: $(basename "$0") <command> [username]"
+    echo ""
+    echo "Commands:"
+    echo "  add <username>       Create user with temp password (must change on first login)"
+    echo "  remove <username>    Remove a user"
+    echo "  reset <username>     Reset password (new temp, forced change)"
+    echo "  list                 List all OOB users and status"
+    echo "  lock <username>      Lock (disable) a user account"
+    echo "  unlock <username>    Unlock a user account"
+    exit 1
+}
+
+# Check container is running
+check_container() {
+    if ! docker inspect "$CONTAINER" &>/dev/null; then
+        echo "ERROR: Container '${CONTAINER}' not found."
+        echo "Start it with: cd /opt/pots && docker compose up -d"
+        exit 1
+    fi
+    if [[ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER")" != "true" ]]; then
+        echo "ERROR: Container '${CONTAINER}' is not running."
+        exit 1
+    fi
+}
+
+generate_password() {
+    # 12-char alphanumeric temp password
+    tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 12
+}
+
+persist_users() {
+    # Save user list and password hashes to the persistent volume
+    docker exec "$CONTAINER" bash -c '
+        DATA_DIR=/data/users
+        mkdir -p "$DATA_DIR"
+        # Save oob group members
+        getent group oob | cut -d: -f4 | tr "," "\n" | while read u; do
+            echo "$u:"
+        done > "${DATA_DIR}/users.conf"
+        # Save shadow entries for oob users
+        > "${DATA_DIR}/shadow.conf"
+        > "${DATA_DIR}/force_change.list"
+        getent group oob | cut -d: -f4 | tr "," "\n" | while read u; do
+            hash=$(getent shadow "$u" 2>/dev/null | cut -d: -f2)
+            echo "${u}:${hash}:" >> "${DATA_DIR}/shadow.conf"
+            # Check if password change is forced (last change = 0)
+            lastchange=$(chage -l "$u" 2>/dev/null | grep "Last password change" | grep -c "password must be changed")
+            if [[ $lastchange -gt 0 ]]; then
+                echo "$u" >> "${DATA_DIR}/force_change.list"
+            fi
+        done
+    '
+}
+
+cmd_add() {
+    local username="$1"
+
+    # Validate username format
+    if [[ ! "$username" =~ ^[a-z][a-z0-9._-]{1,30}$ ]]; then
+        echo "ERROR: Invalid username. Use lowercase letters, numbers, dots, hyphens."
+        echo "       Must start with a letter. Example: gabriel.morris"
+        exit 1
+    fi
+
+    # Check if user already exists in container
+    if docker exec "$CONTAINER" id "$username" &>/dev/null; then
+        echo "ERROR: User '${username}' already exists."
+        exit 1
+    fi
+
+    local temp_pass
+    temp_pass=$(generate_password)
+
+    # Create user in container with oob-menu as shell
+    docker exec "$CONTAINER" bash -c "
+        useradd -m -s /usr/local/bin/oob-menu -G oob,dialout '${username}'
+        echo '${username}:${temp_pass}' | chpasswd
+        chage -d 0 '${username}'
+    "
+
+    persist_users
+
+    echo ""
+    echo "  User created successfully."
+    echo ""
+    echo "  Username:       ${username}"
+    echo "  Temp password:  ${temp_pass}"
+    echo "  Login:          ssh ${username}@<server-ip> -p 2222"
+    echo ""
+    echo "  Password change will be forced on first login."
+    echo "  User will be dropped directly into the OOB console menu."
+    echo ""
+}
+
+cmd_remove() {
+    local username="$1"
+
+    if ! docker exec "$CONTAINER" id "$username" &>/dev/null; then
+        echo "ERROR: User '${username}' does not exist."
+        exit 1
+    fi
+
+    docker exec "$CONTAINER" userdel -r "$username" 2>/dev/null || true
+    persist_users
+
+    echo "  User '${username}' removed."
+}
+
+cmd_reset() {
+    local username="$1"
+
+    if ! docker exec "$CONTAINER" id "$username" &>/dev/null; then
+        echo "ERROR: User '${username}' does not exist."
+        exit 1
+    fi
+
+    local temp_pass
+    temp_pass=$(generate_password)
+
+    docker exec "$CONTAINER" bash -c "
+        echo '${username}:${temp_pass}' | chpasswd
+        chage -d 0 '${username}'
+    "
+
+    persist_users
+
+    echo ""
+    echo "  Password reset for '${username}'."
+    echo "  New temp password:  ${temp_pass}"
+    echo "  Password change will be forced on next login."
+    echo ""
+}
+
+cmd_list() {
+    echo ""
+    echo "  OOB Console Hub Users"
+    echo "  ─────────────────────────────────────────────"
+    printf "  %-25s %-10s %s\n" "USERNAME" "STATUS" "LAST LOGIN"
+    echo "  ─────────────────────────────────────────────"
+
+    docker exec "$CONTAINER" bash -c '
+        getent group oob 2>/dev/null | cut -d: -f4 | tr "," "\n" | sort | while read username; do
+            [[ -z "$username" ]] && continue
+            # Check if locked
+            status="active"
+            if passwd -S "$username" 2>/dev/null | grep -q " L "; then
+                status="locked"
+            fi
+            # Last login
+            lastlog=$(lastlog -u "$username" 2>/dev/null | tail -1 | awk "{print \$4, \$5, \$6, \$7}" )
+            if echo "$lastlog" | grep -q "Never"; then
+                lastlog="Never"
+            fi
+            printf "  %-25s %-10s %s\n" "$username" "$status" "$lastlog"
+        done
+    '
+    echo ""
+}
+
+cmd_lock() {
+    local username="$1"
+
+    if ! docker exec "$CONTAINER" id "$username" &>/dev/null; then
+        echo "ERROR: User '${username}' does not exist."
+        exit 1
+    fi
+
+    docker exec "$CONTAINER" usermod -L "$username"
+    persist_users
+    echo "  User '${username}' locked."
+}
+
+cmd_unlock() {
+    local username="$1"
+
+    if ! docker exec "$CONTAINER" id "$username" &>/dev/null; then
+        echo "ERROR: User '${username}' does not exist."
+        exit 1
+    fi
+
+    docker exec "$CONTAINER" usermod -U "$username"
+    persist_users
+    echo "  User '${username}' unlocked."
+}
+
+# --- Main ---
+[[ $# -lt 1 ]] && usage
+
+check_container
+
+case "$1" in
+    add)
+        [[ $# -lt 2 ]] && { echo "ERROR: Username required."; usage; }
+        cmd_add "$2"
+        ;;
+    remove)
+        [[ $# -lt 2 ]] && { echo "ERROR: Username required."; usage; }
+        cmd_remove "$2"
+        ;;
+    reset)
+        [[ $# -lt 2 ]] && { echo "ERROR: Username required."; usage; }
+        cmd_reset "$2"
+        ;;
+    list)
+        cmd_list
+        ;;
+    lock)
+        [[ $# -lt 2 ]] && { echo "ERROR: Username required."; usage; }
+        cmd_lock "$2"
+        ;;
+    unlock)
+        [[ $# -lt 2 ]] && { echo "ERROR: Username required."; usage; }
+        cmd_unlock "$2"
+        ;;
+    *)
+        echo "ERROR: Unknown command '$1'"
+        usage
+        ;;
+esac

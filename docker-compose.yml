@@ -6,7 +6,7 @@ services:
     env_file:
       - .env
     ports:
-      # SSH access for admins
+      # SSH access for OOB users (individual accounts)
       - "${SSH_PORT:-2222}:22"
       # SIP signaling to Telnyx
       - "5060:5060/udp"
@@ -17,6 +17,8 @@ services:
       - ./logs:/var/log/oob-sessions
       # Site config can be edited without rebuild
       - ./config/oob-sites.conf:/etc/oob-sites.conf:ro
+      # User accounts persist across container rebuilds
+      - oob-userdata:/data/users
     cap_add:
       # Needed for creating PTY devices (IAXmodem virtual serial ports)
       - SYS_ADMIN
@@ -24,3 +26,6 @@ services:
       - /dev/ptmx:/dev/ptmx
     tmpfs:
       - /dev/pts
+
+volumes:
+  oob-userdata:

@@ -215,6 +215,10 @@ if [[ ! -f .env ]]; then
     echo "  >>> nano ${INSTALL_DIR}/.env"
 fi
 
+# Install user management script to host PATH
+cp "${INSTALL_DIR}/scripts/oob-user-manage" /usr/local/bin/oob-user-manage
+chmod +x /usr/local/bin/oob-user-manage
+
 # Set ownership
 chown -R "${HOST_ADMIN_USER}:${HOST_ADMIN_USER}" "$INSTALL_DIR"
 
@@ -242,8 +246,21 @@ echo "     cd ${INSTALL_DIR}"
 echo "     docker compose build"
 echo "     docker compose up -d"
 echo ""
-echo "  6. Admins connect to the OOB menu:"
-echo "     ssh oob@<server-ip> -p ${OOB_SSH_PORT}"
+echo "  6. Create OOB users:"
+echo "     oob-user-manage add gabriel.morris"
+echo "     oob-user-manage add john.smith"
+echo "     oob-user-manage list"
+echo ""
+echo "  7. Users connect to the OOB menu with their own credentials:"
+echo "     ssh gabriel.morris@<server-ip> -p ${OOB_SSH_PORT}"
+echo ""
+echo "  User management:"
+echo "     oob-user-manage add <user>      Create user (temp pass, forced change)"
+echo "     oob-user-manage remove <user>   Remove user"
+echo "     oob-user-manage reset <user>    Reset password"
+echo "     oob-user-manage lock <user>     Disable account"
+echo "     oob-user-manage unlock <user>   Re-enable account"
+echo "     oob-user-manage list            Show all users"
 echo ""
 echo "  Firewall: host SSH(:${HOST_SSH_PORT}), OOB(:${OOB_SSH_PORT}), SIP(:5060/udp), RTP(:10000-10100/udp)"
 echo ""
