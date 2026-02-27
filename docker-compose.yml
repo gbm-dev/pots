@@ -1,6 +1,8 @@
 services:
   oob-hub:
-    build: .
+    build:
+      context: .
+      network: host
     container_name: oob-console-hub
     restart: unless-stopped
     env_file:
@@ -19,6 +21,9 @@ services:
       - ./config/oob-sites.conf:/etc/oob-sites.conf:ro
       # User accounts persist across container rebuilds
       - oob-userdata:/data/users
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     cap_add:
       # Needed for creating PTY devices (IAXmodem virtual serial ports)
       - SYS_ADMIN
