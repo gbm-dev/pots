@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Build iaxmodem from source (bundles its own spandsp + libiax2)
 # CFLAGS needed for modern gcc (12+) compatibility with old codebase
 ENV CFLAGS="-Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types"
+ENV LDFLAGS="-lm"
 RUN wget -O /tmp/iaxmodem.tar.gz \
         "https://sourceforge.net/projects/iaxmodem/files/iaxmodem/iaxmodem-${IAXMODEM_VERSION}.tar.gz/download" \
     && cd /tmp && tar xzf iaxmodem.tar.gz \
@@ -35,6 +36,7 @@ RUN wget -O /tmp/iaxmodem.tar.gz \
     && chmod +x /usr/local/bin/iaxmodem \
     && cd / && rm -rf /tmp/iaxmodem*
 ENV CFLAGS=
+ENV LDFLAGS=
 
 # Remove build deps to keep image smaller
 RUN apt-get purge -y build-essential wget libtiff-dev \
