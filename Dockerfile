@@ -1,12 +1,13 @@
-FROM debian:bookworm-slim
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV IAXMODEM_VERSION=1.3.3
 
-# Install Asterisk, IAXmodem, and utility packages
+# Install Asterisk and utility packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     asterisk \
     asterisk-modules \
-    iaxmodem \
+    asterisk-core-sounds-en-gsm \
     openssh-server \
     dialog \
     expect \
@@ -14,11 +15,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     screen \
     psmisc \
     procps \
+    passwd \
     ca-certificates \
+    # Build deps for iaxmodem
+    build-essential \
+    wget \
+    libtiff-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build iaxmodem from source (bundles its own spandsp + libiax2)
+# CFLAGS needed for modern gcc (12+) compatibility with old codebase
+ENV CFLAGS="-Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types"
+RUN wget -O /tmp/iaxmodem.tar.gz \
+        "https://sourceforge.net/projects/iaxmodem/files/iaxmodem/iaxmodem-${IAXMODEM_VERSION}/iaxmodem-${IAXMODEM_VERSION}.tar.gz/download" \
+    && cd /tmp && tar xzf iaxmodem.tar.gz \
+    && cd iaxmodem-${IAXMODEM_VERSION} \
+    && ./build.sh \
+    && cp iaxmodem /usr/local/bin/iaxmodem \
+    && chmod +x /usr/local/bin/iaxmodem \
+    && cd / && rm -rf /tmp/iaxmodem*
+ENV CFLAGS=
+
+# Remove build deps to keep image smaller
+RUN apt-get purge -y build-essential wget libtiff-dev \
+    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directories
-RUN mkdir -p /run/sshd /var/log/oob-sessions /etc/iaxmodem
+RUN mkdir -p /run/sshd /var/log/oob-sessions /etc/iaxmodem /var/log/iaxmodem
 
 # Copy Asterisk configuration
 COPY config/asterisk/pjsip_wizard.conf /etc/asterisk/pjsip_wizard.conf
