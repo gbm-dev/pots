@@ -1,7 +1,7 @@
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV IAXMODEM_VERSION=1.3.3
+ENV IAXMODEM_VERSION=1.3.4
 
 # Install Asterisk and utility packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # CFLAGS needed for modern gcc (12+) compatibility with old codebase
 ENV CFLAGS="-Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types"
 RUN wget -O /tmp/iaxmodem.tar.gz \
-        "https://sourceforge.net/projects/iaxmodem/files/iaxmodem/iaxmodem-${IAXMODEM_VERSION}/iaxmodem-${IAXMODEM_VERSION}.tar.gz/download" \
+        "https://sourceforge.net/projects/iaxmodem/files/iaxmodem/iaxmodem-${IAXMODEM_VERSION}.tar.gz/download" \
     && cd /tmp && tar xzf iaxmodem.tar.gz \
     && cd iaxmodem-${IAXMODEM_VERSION} \
     && ./build.sh \
