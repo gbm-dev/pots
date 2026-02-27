@@ -86,30 +86,7 @@ usermod -aG docker "$HOST_ADMIN_USER"
 echo "  Added '${HOST_ADMIN_USER}' to docker group."
 
 # --- 3. SSH Hardening ---
-echo "[3/5] Hardening SSH..."
-
-cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%s)
-
-cat > /etc/ssh/sshd_config.d/hardening.conf <<SSHEOF
-# OOB Host SSH Hardening
-Port ${HOST_SSH_PORT}
-PermitRootLogin no
-PasswordAuthentication no
-PubkeyAuthentication yes
-AuthenticationMethods publickey
-MaxAuthTries 3
-MaxSessions 3
-LoginGraceTime 30
-ClientAliveInterval 300
-ClientAliveCountMax 2
-X11Forwarding no
-AllowTcpForwarding no
-AllowAgentForwarding no
-PermitEmptyPasswords no
-
-# Only allow the host admin user to SSH to the host
-AllowUsers ${HOST_ADMIN_USER}
-SSHEOF
+echo "[3/6] Hardening SSH..."
 
 # Detect SSH service name (sshd on older Ubuntu, ssh on 24.04+)
 if systemctl list-units --type=service --all | grep -q 'sshd\.service'; then
@@ -118,18 +95,68 @@ else
     SSH_SERVICE="ssh"
 fi
 
+cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%s)
+
+# Copy root's authorized_keys to the admin user so they don't get locked out
+if [[ -f /root/.ssh/authorized_keys ]]; then
+    cat /root/.ssh/authorized_keys >> "/home/${HOST_ADMIN_USER}/.ssh/authorized_keys"
+    # Deduplicate
+    sort -u "/home/${HOST_ADMIN_USER}/.ssh/authorized_keys" -o "/home/${HOST_ADMIN_USER}/.ssh/authorized_keys"
+    chown "${HOST_ADMIN_USER}:${HOST_ADMIN_USER}" "/home/${HOST_ADMIN_USER}/.ssh/authorized_keys"
+    echo "  Copied root's SSH keys to ${HOST_ADMIN_USER}."
+fi
+
+# Check if the admin user has at least one SSH key before disabling password auth
+ADMIN_KEY_COUNT=$(wc -l < "/home/${HOST_ADMIN_USER}/.ssh/authorized_keys" 2>/dev/null || echo 0)
+
+if [[ "$ADMIN_KEY_COUNT" -eq 0 ]]; then
+    echo ""
+    echo "  !!! WARNING: No SSH keys found for '${HOST_ADMIN_USER}' !!!"
+    echo "  !!! Password auth will remain ENABLED to prevent lockout. !!!"
+    echo "  !!! Add your key, then re-run this script to finish hardening. !!!"
+    echo ""
+    ALLOW_PASSWORD="yes"
+else
+    echo "  Found ${ADMIN_KEY_COUNT} SSH key(s) for '${HOST_ADMIN_USER}'."
+    ALLOW_PASSWORD="no"
+fi
+
+cat > /etc/ssh/sshd_config.d/hardening.conf <<SSHEOF
+# OOB Host SSH Hardening
+Port ${HOST_SSH_PORT}
+PermitRootLogin prohibit-password
+PasswordAuthentication ${ALLOW_PASSWORD}
+PubkeyAuthentication yes
+MaxAuthTries 3
+MaxSessions 5
+LoginGraceTime 30
+ClientAliveInterval 300
+ClientAliveCountMax 2
+X11Forwarding no
+AllowTcpForwarding no
+AllowAgentForwarding no
+PermitEmptyPasswords no
+
+# Allow host admin and root (key-only)
+AllowUsers ${HOST_ADMIN_USER} root
+SSHEOF
+
 # Validate config before restarting
 if sshd -t 2>/dev/null; then
     systemctl restart "$SSH_SERVICE"
-    echo "  SSH hardened. Key-only auth for '${HOST_ADMIN_USER}' on port ${HOST_SSH_PORT}."
+    if [[ "$ALLOW_PASSWORD" == "no" ]]; then
+        echo "  SSH hardened. Key-only auth enabled."
+    else
+        echo "  SSH configured. Password auth still enabled (no keys found)."
+    fi
 else
     echo "  WARNING: sshd config test failed. Reverting."
     rm /etc/ssh/sshd_config.d/hardening.conf
 fi
 
 echo ""
-echo "  !!! IMPORTANT: Before logging out, ensure you can SSH in with your key !!!"
-echo "  !!! Test in another terminal: ssh ${HOST_ADMIN_USER}@<this-ip> -p ${HOST_SSH_PORT} !!!"
+echo "  !!! TEST SSH in another terminal before logging out !!!"
+echo "  !!! ssh ${HOST_ADMIN_USER}@<this-ip> -p ${HOST_SSH_PORT} !!!"
 echo ""
 
 # --- 4. Firewall (nftables) ---
