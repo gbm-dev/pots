@@ -1,0 +1,8 @@
+[Unit]
+Description=OOB Console Hub Watchdog
+After=oob-hub.service
+Requires=oob-hub.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/pots/scripts/oob-watchdog.sh

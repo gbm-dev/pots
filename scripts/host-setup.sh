@@ -196,7 +196,7 @@ nft -f /etc/nftables.conf
 echo "  nftables configured. Open ports: ${HOST_SSH_PORT}/tcp (host SSH), ${OOB_SSH_PORT}/tcp (OOB), 5060/udp (SIP), 10000-10100/udp (RTP)"
 
 # --- 5. Clone and prepare OOB hub ---
-echo "[5/5] Setting up OOB Console Hub..."
+echo "[5/6] Setting up OOB Console Hub..."
 
 if [[ -d "$INSTALL_DIR" ]]; then
     echo "  ${INSTALL_DIR} already exists. Pulling latest..."
@@ -214,6 +214,21 @@ if [[ ! -f .env ]]; then
     echo "  >>> Edit your Telnyx credentials:"
     echo "  >>> nano ${INSTALL_DIR}/.env"
 fi
+
+# --- 6. Install systemd service and watchdog ---
+echo "[6/6] Installing systemd service and watchdog..."
+
+cp "${INSTALL_DIR}/systemd/oob-hub.service" /etc/systemd/system/
+cp "${INSTALL_DIR}/systemd/oob-watchdog.service" /etc/systemd/system/
+cp "${INSTALL_DIR}/systemd/oob-watchdog.timer" /etc/systemd/system/
+chmod +x "${INSTALL_DIR}/scripts/oob-watchdog.sh"
+
+systemctl daemon-reload
+systemctl enable oob-hub.service
+systemctl enable oob-watchdog.timer
+
+echo "  Installed: oob-hub.service (starts container on boot)"
+echo "  Installed: oob-watchdog.timer (health checks every 2 min)"
 
 # Install user management script to host PATH
 cp "${INSTALL_DIR}/scripts/oob-user-manage" /usr/local/bin/oob-user-manage
@@ -241,10 +256,10 @@ echo ""
 echo "  4. Add your remote sites:"
 echo "     nano ${INSTALL_DIR}/config/oob-sites.conf"
 echo ""
-echo "  5. Build and start the container:"
-echo "     cd ${INSTALL_DIR}"
-echo "     docker compose build"
-echo "     docker compose up -d"
+echo "  5. Build and start via systemd:"
+echo "     cd ${INSTALL_DIR} && docker compose build"
+echo "     systemctl start oob-hub"
+echo "     systemctl start oob-watchdog.timer"
 echo ""
 echo "  6. Create OOB users:"
 echo "     oob-user-manage add gabriel.morris"
@@ -261,6 +276,12 @@ echo "     oob-user-manage reset <user>    Reset password"
 echo "     oob-user-manage lock <user>     Disable account"
 echo "     oob-user-manage unlock <user>   Re-enable account"
 echo "     oob-user-manage list            Show all users"
+echo ""
+echo "  Monitoring:"
+echo "     systemctl status oob-hub              # service status"
+echo "     systemctl status oob-watchdog.timer    # watchdog timer"
+echo "     journalctl -u oob-watchdog -f          # watchdog logs"
+echo "     docker exec oob-console-hub oob-healthcheck.sh --verbose  # manual health check"
 echo ""
 echo "  Firewall: host SSH(:${HOST_SSH_PORT}), OOB(:${OOB_SSH_PORT}), SIP(:5060/udp), RTP(:10000-10100/udp)"
 echo ""

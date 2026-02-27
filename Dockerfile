@@ -36,15 +36,21 @@ COPY config/oob-sites.conf /etc/oob-sites.conf
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY scripts/setup-iaxmodem.sh /usr/local/bin/setup-iaxmodem.sh
 COPY scripts/oob-menu /usr/local/bin/oob-menu
+COPY scripts/oob-healthcheck.sh /usr/local/bin/oob-healthcheck.sh
 
 RUN chmod +x /usr/local/bin/entrypoint.sh \
              /usr/local/bin/setup-iaxmodem.sh \
-             /usr/local/bin/oob-menu
+             /usr/local/bin/oob-menu \
+             /usr/local/bin/oob-healthcheck.sh
 
 # Expose ports
 # 22   - SSH
 # 5060 - SIP (UDP)
 # 10000-10100 - RTP media
 EXPOSE 22 5060/udp 10000-10100/udp
+
+# Docker-level health check (every 30s, 10s timeout, 3 retries before unhealthy)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD /usr/local/bin/oob-healthcheck.sh || exit 1
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
