@@ -111,9 +111,16 @@ PermitEmptyPasswords no
 AllowUsers ${HOST_ADMIN_USER}
 SSHEOF
 
+# Detect SSH service name (sshd on older Ubuntu, ssh on 24.04+)
+if systemctl list-units --type=service --all | grep -q 'sshd\.service'; then
+    SSH_SERVICE="sshd"
+else
+    SSH_SERVICE="ssh"
+fi
+
 # Validate config before restarting
 if sshd -t 2>/dev/null; then
-    systemctl restart sshd
+    systemctl restart "$SSH_SERVICE"
     echo "  SSH hardened. Key-only auth for '${HOST_ADMIN_USER}' on port ${HOST_SSH_PORT}."
 else
     echo "  WARNING: sshd config test failed. Reverting."
