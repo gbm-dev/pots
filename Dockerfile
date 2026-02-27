@@ -1,7 +1,6 @@
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV IAXMODEM_VERSION=1.3.4
 
 # Install Asterisk and utility packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -17,31 +16,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     passwd \
     ca-certificates \
-    # Build deps for iaxmodem
-    build-essential \
     wget \
-    libtiff-dev \
+    libtiff6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Build iaxmodem from source (bundles its own spandsp + libiax2)
-# CFLAGS needed for modern gcc (12+) compatibility with old codebase
-ENV CFLAGS="-Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types"
-RUN wget -O /tmp/iaxmodem.tar.gz \
-        "https://sourceforge.net/projects/iaxmodem/files/iaxmodem/iaxmodem-${IAXMODEM_VERSION}.tar.gz/download" \
-    && cd /tmp && tar xzf iaxmodem.tar.gz \
-    && cd iaxmodem-${IAXMODEM_VERSION} \
-    # Patch build script: append -lm to final gcc link line so math symbols resolve
-    && sed -i 's/\(-liax\)/\1 -lm/' build \
-    && ./build static \
-    && cp iaxmodem /usr/local/bin/iaxmodem \
-    && chmod +x /usr/local/bin/iaxmodem \
-    && cd / && rm -rf /tmp/iaxmodem*
-ENV CFLAGS=
-
-# Remove build deps to keep image smaller
-RUN apt-get purge -y build-essential wget libtiff-dev \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
+# Install iaxmodem from Debian bookworm prebuilt .deb (not in Ubuntu repos)
+RUN wget -O /tmp/iaxmodem.deb \
+        "http://deb.debian.org/debian/pool/main/i/iaxmodem/iaxmodem_1.2.0~dfsg-4_amd64.deb" \
+    && dpkg -i /tmp/iaxmodem.deb || apt-get install -f -y \
+    && rm /tmp/iaxmodem.deb
 
 # Create directories
 RUN mkdir -p /run/sshd /var/log/oob-sessions /etc/iaxmodem /var/log/iaxmodem
