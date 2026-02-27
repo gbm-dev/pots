@@ -1,0 +1,26 @@
+services:
+  oob-hub:
+    build: .
+    container_name: oob-console-hub
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      # SSH access for admins
+      - "${SSH_PORT:-2222}:22"
+      # SIP signaling to Telnyx
+      - "5060:5060/udp"
+      # RTP media range
+      - "10000-10100:10000-10100/udp"
+    volumes:
+      # Session logs persist on host
+      - ./logs:/var/log/oob-sessions
+      # Site config can be edited without rebuild
+      - ./config/oob-sites.conf:/etc/oob-sites.conf:ro
+    cap_add:
+      # Needed for creating PTY devices (IAXmodem virtual serial ports)
+      - SYS_ADMIN
+    devices:
+      - /dev/ptmx:/dev/ptmx
+    tmpfs:
+      - /dev/pts

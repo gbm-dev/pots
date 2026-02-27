@@ -1,0 +1,138 @@
+#!/bin/bash
+# OOB Console Hub - TUI Menu
+# This is set as the login shell for the 'oob' user.
+# Admins SSH in and get this menu automatically.
+
+set -euo pipefail
+
+CONFIG=/etc/oob-sites.conf
+LOG_DIR=/var/log/oob-sessions
+
+if [[ ! -f "$CONFIG" ]]; then
+    echo "ERROR: No site config at $CONFIG"
+    echo "Add sites in format: name|phone_number|description|baud_rate"
+    read -rp "Press Enter to exit..."
+    exit 1
+fi
+
+cleanup() {
+    clear
+    echo "Goodbye."
+    exit 0
+}
+trap cleanup INT TERM
+
+while true; do
+    # Read non-comment, non-empty lines
+    mapfile -t lines < <(grep -v '^\s*#' "$CONFIG" | grep -v '^\s*$')
+
+    if [[ ${#lines[@]} -eq 0 ]]; then
+        dialog --title "OOB Console Hub" \
+               --msgbox "No sites configured.\n\nEdit /etc/oob-sites.conf to add sites." 10 50
+        clear
+        exit 1
+    fi
+
+    # Build dialog menu
+    menu_args=()
+    for i in "${!lines[@]}"; do
+        IFS='|' read -r name phone desc baud <<< "${lines[$i]}"
+        menu_args+=("$((i + 1))" "$name - $desc (${baud} baud)")
+    done
+    menu_args+=("0" "Exit")
+
+    choice=$(dialog --clear --title "Telnyx OOB Console Hub" \
+                    --menu "Select device to connect to:" 20 76 12 \
+                    "${menu_args[@]}" 2>&1 >/dev/tty) || true
+
+    if [[ "$choice" == "0" || -z "$choice" ]]; then
+        clear
+        echo "Goodbye."
+        exit 0
+    fi
+
+    idx=$((choice - 1))
+    IFS='|' read -r name phone desc baud <<< "${lines[$idx]}"
+
+    # Find a free virtual modem port
+    free_port=""
+    for p in $(seq 0 7); do
+        if ! fuser -s "/dev/ttyIAX${p}" 2>/dev/null; then
+            free_port=$p
+            break
+        fi
+    done
+
+    if [[ -z "$free_port" ]]; then
+        dialog --title "Error" \
+               --msgbox "All modem ports are busy.\nTry again in a moment." 8 45
+        continue
+    fi
+
+    clear
+    echo "=============================================="
+    echo "  Connecting to: $name"
+    echo "  Number:        $phone"
+    echo "  Baud rate:     $baud"
+    echo "  Modem port:    ttyIAX${free_port}"
+    echo "=============================================="
+    echo ""
+    echo "Dialing..."
+    echo ""
+
+    # Session log file
+    timestamp=$(date +%Y%m%d-%H%M%S)
+    session_log="${LOG_DIR}/${name}_${timestamp}_ttyIAX${free_port}.log"
+    mkdir -p "$LOG_DIR"
+
+    # Use expect to auto-dial and hand off to interactive session
+    # Wrapped in screen for session logging
+    screen -L -Logfile "$session_log" -S "oob-${name}-$$" \
+        expect -c "
+            set timeout 60
+            log_user 1
+
+            spawn -open [open /dev/ttyIAX${free_port} r+]
+            send \"ATZ\r\"
+            expect {
+                \"OK\" {}
+                timeout {
+                    puts \"\n*** Modem not responding. ***\"
+                    exit 1
+                }
+            }
+
+            send \"ATDT${phone}\r\"
+            expect {
+                \"CONNECT\" {
+                    puts \"\n*** CONNECTED - You are now on ${name} ***\"
+                    puts \"*** Press Ctrl-A then K to disconnect ***\n\"
+                    interact
+                }
+                \"BUSY\" {
+                    puts \"\n*** Line busy. ***\"
+                    exit 1
+                }
+                \"NO CARRIER\" {
+                    puts \"\n*** No carrier - check phone number. ***\"
+                    exit 1
+                }
+                \"NO DIALTONE\" {
+                    puts \"\n*** No dialtone - check Asterisk/Telnyx. ***\"
+                    exit 1
+                }
+                timeout {
+                    puts \"\n*** Dial timeout after 60s. ***\"
+                    send \"+++\"
+                    sleep 1
+                    send \"ATH\r\"
+                    exit 1
+                }
+            }
+        " 2>&1 || true
+
+    echo ""
+    echo "Session ended. Log saved to: $session_log"
+    echo "Returning to menu..."
+    sleep 2
+done
