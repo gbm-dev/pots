@@ -1,0 +1,28 @@
+#!/bin/bash
+# OOB Console Hub - User Management (host-side wrapper)
+# Delegates all commands to oob-manage inside the container.
+#
+# Usage:
+#   oob-user-manage add <username>      Create user with temp password
+#   oob-user-manage remove <username>   Remove a user
+#   oob-user-manage reset <username>    Reset password
+#   oob-user-manage list                List all OOB users
+#   oob-user-manage lock <username>     Lock a user account
+#   oob-user-manage unlock <username>   Unlock a user account
+
+set -euo pipefail
+
+CONTAINER="oob-console-hub"
+
+# Check container is running
+if ! docker inspect "$CONTAINER" &>/dev/null; then
+    echo "ERROR: Container '${CONTAINER}' not found."
+    echo "Start it with: cd /opt/pots && docker compose up -d"
+    exit 1
+fi
+if [[ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER")" != "true" ]]; then
+    echo "ERROR: Container '${CONTAINER}' is not running."
+    exit 1
+fi
+
+exec docker exec "$CONTAINER" oob-manage "$@"
