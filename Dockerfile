@@ -30,7 +30,7 @@ RUN wget -O /tmp/iaxmodem.tar.gz \
         "https://sourceforge.net/projects/iaxmodem/files/iaxmodem/iaxmodem-${IAXMODEM_VERSION}.tar.gz/download" \
     && cd /tmp && tar xzf iaxmodem.tar.gz \
     && cd iaxmodem-${IAXMODEM_VERSION} \
-    && ./build.sh \
+    && ./build static \
     && cp iaxmodem /usr/local/bin/iaxmodem \
     && chmod +x /usr/local/bin/iaxmodem \
     && cd / && rm -rf /tmp/iaxmodem*
