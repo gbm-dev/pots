@@ -1,7 +1,5 @@
 FROM ubuntu:24.04
 
-ARG POTS_VERSION=latest
-
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install Asterisk and minimal utilities
@@ -20,17 +18,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN wget -O /usr/local/bin/iaxmodem \
         "https://github.com/gbm-dev/pots/releases/download/v0.1.0/iaxmodem" \
     && chmod +x /usr/local/bin/iaxmodem
-
-# Install Go binaries from GitHub release
-RUN set -eux; \
-    if [ "$POTS_VERSION" = "latest" ]; then \
-        DL_URL="https://github.com/gbm-dev/pots/releases/latest/download"; \
-    else \
-        DL_URL="https://github.com/gbm-dev/pots/releases/download/${POTS_VERSION}"; \
-    fi; \
-    wget -O /usr/local/bin/oob-hub "${DL_URL}/oob-hub" \
-    && wget -O /usr/local/bin/oob-manage "${DL_URL}/oob-manage" \
-    && chmod +x /usr/local/bin/oob-hub /usr/local/bin/oob-manage
 
 # Create directories
 RUN mkdir -p /var/log/oob-sessions /etc/iaxmodem /var/log/iaxmodem
@@ -56,6 +43,20 @@ COPY scripts/oob-healthcheck.sh /usr/local/bin/oob-healthcheck.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh \
              /usr/local/bin/setup-iaxmodem.sh \
              /usr/local/bin/oob-healthcheck.sh
+
+# Install Go binaries from GitHub release — this layer MUST be after COPY
+# so that any repo change (scripts, configs) busts the cache above it.
+# Pass --build-arg POTS_VERSION=v1.2.0 to pin, or it downloads latest.
+ARG POTS_VERSION=latest
+RUN set -eux; \
+    if [ "$POTS_VERSION" = "latest" ]; then \
+        DL_URL="https://github.com/gbm-dev/pots/releases/latest/download"; \
+    else \
+        DL_URL="https://github.com/gbm-dev/pots/releases/download/${POTS_VERSION}"; \
+    fi; \
+    wget -O /usr/local/bin/oob-hub "${DL_URL}/oob-hub" \
+    && wget -O /usr/local/bin/oob-manage "${DL_URL}/oob-manage" \
+    && chmod +x /usr/local/bin/oob-hub /usr/local/bin/oob-manage
 
 # Expose ports
 # 2222 - SSH (Go TUI)
