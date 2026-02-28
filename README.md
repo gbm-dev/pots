@@ -27,6 +27,25 @@ sudo systemctl start oob-hub
 sudo systemctl start oob-watchdog.timer
 ```
 
+## Updating
+
+Pull the latest and rebuild:
+
+```bash
+cd /opt/pots
+git pull
+docker compose build
+docker compose down && docker compose up -d
+```
+
+Pin a specific release version in the build:
+
+```bash
+docker compose build --build-arg POTS_VERSION=v1.0.0
+```
+
+Go binaries are built by GitHub Actions and downloaded from [releases](https://github.com/gbm-dev/pots/releases) during `docker compose build` — no Go toolchain needed on the server.
+
 ## Site Configuration
 
 Edit `config/oob-sites.conf` — one line per remote device:
