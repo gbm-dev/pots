@@ -18,42 +18,39 @@ const (
 	SIPUnregistered
 )
 
-// SIPInfo holds the parsed SIP registration details.
+// SIPInfo holds the parsed SIP registration details and local infra health.
 type SIPInfo struct {
-	Status SIPStatus
-	Trunk  string // e.g. "telnyx-out"
-	Server string // e.g. "sip.telnyx.com"
-	Expiry string // e.g. "3434s"
+	Status      SIPStatus
+	Trunk       string // e.g. "telnyx-out"
+	Server      string // e.g. "sip.telnyx.com"
+	Expiry      string // e.g. "3434s"
+	ModemReady  bool   // /dev/ttySL0 exists
+	DModemReady bool   // d-modem process running
 }
 
-func (s SIPInfo) String() string {
-	switch s.Status {
-	case SIPRegistered:
-		if s.Trunk != "" {
-			return "SIP: " + s.Trunk + " registered"
-		}
-		return "SIP: registered"
-	case SIPUnregistered:
-		return "SIP: not registered"
-	default:
-		return "SIP: checking..."
-	}
-}
-
-// sipStatusMsg carries the result of a SIP registration check.
-type sipStatusMsg SIPInfo
-
-// checkSIPStatus runs `asterisk -rx "pjsip show registrations"` and parses output.
+// checkSIPStatus runs health checks for all components.
 func checkSIPStatus() tea.Msg {
-	out, err := exec.Command("asterisk", "-rx", "pjsip show registrations").CombinedOutput()
-	if err != nil {
-		slog.Warn("asterisk query failed", "err", err)
-		return sipStatusMsg(SIPInfo{Status: SIPUnregistered})
+	info := SIPInfo{Status: SIPUnregistered}
+
+	// 1. Check Modem (/dev/ttySL0)
+	if _, err := exec.Command("ls", "/dev/ttySL0").CombinedOutput(); err == nil {
+		info.ModemReady = true
 	}
 
-	output := string(out)
-	info := parseSIPRegistrations(output)
-	slog.Debug("sip status", "status", info.String())
+	// 2. Check D-Modem Process
+	if out, err := exec.Command("pgrep", "-f", "d-modem").CombinedOutput(); err == nil && len(out) > 0 {
+		info.DModemReady = true
+	}
+
+	// 3. Check Asterisk SIP Registration
+	out, err := exec.Command("asterisk", "-rx", "pjsip show registrations").CombinedOutput()
+	if err == nil {
+		parsed := parseSIPRegistrations(string(out))
+		info.Status = parsed.Status
+		info.Trunk = parsed.Trunk
+		info.Server = parsed.Server
+	}
+
 	return sipStatusMsg(info)
 }
 

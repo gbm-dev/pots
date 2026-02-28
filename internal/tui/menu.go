@@ -145,31 +145,28 @@ func (m MenuModel) View() string {
 	// Status bar
 	var parts []string
 
-	// SIP status with color and trunk detail
-	switch m.sipInfo.Status {
-	case SIPRegistered:
-		sipText := "● " + m.sipInfo.Trunk
-		if m.sipInfo.Server != "" {
-			sipText += " → " + m.sipInfo.Server
-		}
-		parts = append(parts, m.theme.SuccessStyle.Render(sipText))
-	case SIPUnregistered:
-		sipText := "● SIP not registered"
-		if m.sipInfo.Trunk != "" {
-			sipText = "● " + m.sipInfo.Trunk + " not registered"
-		}
-		parts = append(parts, m.theme.ErrorStyle.Render(sipText))
-	default:
-		parts = append(parts, m.theme.LabelStyle.Render("○ SIP checking..."))
-	}
-
-	// Modem status
-	if activeSite := m.lock.ActiveSite(); activeSite != "" {
-		parts = append(parts, m.theme.WarningStyle.Render(fmt.Sprintf("Modem: %s", activeSite)))
+	// 1. slmodemd health
+	if m.sipInfo.ModemReady {
+		parts = append(parts, m.theme.SuccessStyle.Render("● SLMODEMD"))
 	} else {
-		parts = append(parts, m.theme.LabelStyle.Render("Modem: idle"))
+		parts = append(parts, m.theme.ErrorStyle.Render("● SLMODEMD DOWN"))
 	}
 
+	// 2. d-modem health
+	if m.sipInfo.DModemReady {
+		parts = append(parts, m.theme.SuccessStyle.Render("● D-MODEM"))
+	} else {
+		parts = append(parts, m.theme.ErrorStyle.Render("● D-MODEM DOWN"))
+	}
+
+	// 3. Telnyx health
+	if m.sipInfo.Status == SIPRegistered {
+		parts = append(parts, m.theme.SuccessStyle.Render("● TELNYX"))
+	} else {
+		parts = append(parts, m.theme.ErrorStyle.Render("● TELNYX DOWN"))
+	}
+
+	// User info
 	parts = append(parts, m.theme.LabelStyle.Render(m.username))
 	parts = append(parts, m.theme.LabelStyle.Render("enter connect · q quit"))
 
