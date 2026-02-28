@@ -57,7 +57,7 @@ RUN wget -O /usr/local/bin/iaxmodem \
 
 # Install D-Modem binaries built in the previous stage.
 COPY --from=dmodem-builder /tmp/dmodem/slmodemd/slmodemd /usr/local/bin/slmodemd
-COPY --from=dmodem-builder /tmp/dmodem/d-modem.nopulse /usr/local/bin/d-modem.nopulse
+COPY --from=dmodem-builder /tmp/dmodem/d-modem /usr/local/bin/d-modem
 
 # Create directories
 RUN mkdir -p /var/log/oob-sessions /etc/iaxmodem /var/log/iaxmodem /var/log/dmodem
