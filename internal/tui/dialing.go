@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/gbm-dev/pots/internal/config"
 	"github.com/gbm-dev/pots/internal/modem"
 )
@@ -15,13 +16,14 @@ const resetTimeout = 5 * time.Second
 
 // DialingModel shows connection progress with a spinner.
 type DialingModel struct {
-	spinner spinner.Model
-	site    config.Site
-	status  string
-	device  string
-	err     error
-	done    bool
-	pool    *modem.Pool
+	spinner    spinner.Model
+	site       config.Site
+	status     string
+	device     string
+	transcript string
+	err        error
+	done       bool
+	pool       *modem.Pool
 }
 
 // NewDialingModel creates a dialing view for the given site.
@@ -55,9 +57,12 @@ func (m DialingModel) Update(msg tea.Msg) (DialingModel, tea.Cmd) {
 	case DialResultMsg:
 		if msg.Result == modem.ResultConnect {
 			m.status = successStyle.Render("CONNECTED")
+			m.device = msg.Device
 			return m, nil
 		}
 		m.done = true
+		m.device = msg.Device
+		m.transcript = msg.Transcript
 		m.err = fmt.Errorf("%s", msg.Result)
 		return m, nil
 
@@ -86,11 +91,14 @@ func (m DialingModel) View() string {
 		m.site.Phone, m.site.BaudRate, m.deviceDisplay())
 
 	if m.err != nil {
-		return boxStyle.Render(
-			header + "\n\n" + details + "\n\n" +
-				errorStyle.Render(fmt.Sprintf("  Error: %s", m.err)) + "\n\n" +
-				labelStyle.Render("  Press Enter to return to menu"),
-		)
+		view := header + "\n\n" + details + "\n\n" +
+			errorStyle.Render(fmt.Sprintf("  Error: %s", m.err))
+		if m.transcript != "" {
+			view += "\n\n" + labelStyle.Render("  AT log:") + "\n" +
+				lipgloss.NewStyle().Foreground(colorMuted).PaddingLeft(4).Render(m.transcript)
+		}
+		view += "\n\n" + labelStyle.Render("  Press Enter to return to menu")
+		return boxStyle.Render(view)
 	}
 
 	return boxStyle.Render(
@@ -131,18 +139,18 @@ func (m DialingModel) acquireAndDial() tea.Cmd {
 		}
 
 		// Step 4: Dial
-		result, err := mdm.Dial(m.site.Phone, dialTimeout)
+		resp, err := mdm.Dial(m.site.Phone, dialTimeout)
 		if err != nil {
 			mdm.Close()
 			m.pool.Release(dev)
 			return ErrorMsg{Err: fmt.Errorf("dial error: %w", err), Context: "dial"}
 		}
 
-		if result != modem.ResultConnect {
+		if resp.Result != modem.ResultConnect {
 			mdm.Close()
 			m.pool.Release(dev)
 		}
 
-		return DialResultMsg{Result: result, Modem: mdm, Device: dev}
+		return DialResultMsg{Result: resp.Result, Transcript: resp.Transcript, Modem: mdm, Device: dev}
 	}
 }

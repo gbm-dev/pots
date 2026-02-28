@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -40,11 +41,18 @@ func (r DialResult) String() string {
 	}
 }
 
+// DialResponse holds the result and raw AT transcript from a dial attempt.
+type DialResponse struct {
+	Result     DialResult
+	Transcript string // raw AT command/response exchange
+}
+
 // Modem represents an open modem device.
 type Modem struct {
 	dev    *os.File
 	path   string
 	reader *bufio.Reader
+	log    strings.Builder // accumulates the full AT transcript
 }
 
 // Open opens a modem device at the given path.
@@ -53,60 +61,81 @@ func Open(devicePath string) (*Modem, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening modem device %s: %w", devicePath, err)
 	}
-	return &Modem{
+	m := &Modem{
 		dev:    f,
 		path:   devicePath,
 		reader: bufio.NewReader(f),
-	}, nil
+	}
+	log.Printf("[modem] opened %s", devicePath)
+	return m, nil
 }
 
 // Reset sends ATZ and waits for OK.
 func (m *Modem) Reset(timeout time.Duration) error {
+	m.logCmd("ATZ")
 	if _, err := m.dev.Write([]byte("ATZ\r")); err != nil {
 		return fmt.Errorf("sending ATZ: %w", err)
 	}
 	resp, err := m.readUntil(timeout, "OK", "ERROR")
+	m.logResp(resp)
 	if err != nil {
-		return fmt.Errorf("ATZ response: %w", err)
+		return fmt.Errorf("ATZ: no response (%w)", err)
 	}
 	if strings.Contains(resp, "ERROR") {
-		return fmt.Errorf("ATZ returned ERROR")
+		return fmt.Errorf("ATZ returned ERROR: %s", cleanResponse(resp))
 	}
 	return nil
 }
 
-// Dial sends ATDT and returns the result.
-func (m *Modem) Dial(phone string, timeout time.Duration) (DialResult, error) {
-	cmd := fmt.Sprintf("ATDT%s\r", phone)
-	if _, err := m.dev.Write([]byte(cmd)); err != nil {
-		return ResultError, fmt.Errorf("sending ATDT: %w", err)
+// Dial sends ATDT and returns the result with full transcript.
+func (m *Modem) Dial(phone string, timeout time.Duration) (DialResponse, error) {
+	cmd := fmt.Sprintf("ATDT%s", phone)
+	m.logCmd(cmd)
+	if _, err := m.dev.Write([]byte(cmd + "\r")); err != nil {
+		return DialResponse{Result: ResultError, Transcript: m.log.String()},
+			fmt.Errorf("sending ATDT: %w", err)
 	}
+
 	resp, err := m.readUntil(timeout, "CONNECT", "BUSY", "NO CARRIER", "NO DIALTONE", "ERROR")
+	m.logResp(resp)
+
+	transcript := m.log.String()
+
 	if err != nil {
-		return ResultTimeout, nil
+		log.Printf("[modem] %s dial timeout\n%s", m.path, transcript)
+		return DialResponse{Result: ResultTimeout, Transcript: transcript}, nil
 	}
+
+	var result DialResult
 	switch {
 	case strings.Contains(resp, "CONNECT"):
-		return ResultConnect, nil
+		result = ResultConnect
 	case strings.Contains(resp, "BUSY"):
-		return ResultBusy, nil
+		result = ResultBusy
 	case strings.Contains(resp, "NO CARRIER"):
-		return ResultNoCarrier, nil
+		result = ResultNoCarrier
 	case strings.Contains(resp, "NO DIALTONE"):
-		return ResultNoDialtone, nil
+		result = ResultNoDialtone
 	default:
-		return ResultError, nil
+		result = ResultError
 	}
+
+	log.Printf("[modem] %s dial result: %s\n%s", m.path, result, transcript)
+	return DialResponse{Result: result, Transcript: transcript}, nil
+}
+
+// Transcript returns the accumulated AT command log.
+func (m *Modem) Transcript() string {
+	return m.log.String()
 }
 
 // Hangup sends the escape sequence and ATH to hang up.
 func (m *Modem) Hangup() error {
-	// Guard time before escape
+	log.Printf("[modem] %s hangup", m.path)
 	time.Sleep(1100 * time.Millisecond)
 	if _, err := m.dev.Write([]byte("+++")); err != nil {
 		return fmt.Errorf("sending escape: %w", err)
 	}
-	// Guard time after escape
 	time.Sleep(1100 * time.Millisecond)
 	if _, err := m.dev.Write([]byte("ATH\r")); err != nil {
 		return fmt.Errorf("sending ATH: %w", err)
@@ -122,7 +151,23 @@ func (m *Modem) ReadWriteCloser() io.ReadWriteCloser {
 
 // Close closes the modem device.
 func (m *Modem) Close() error {
+	log.Printf("[modem] %s closed", m.path)
 	return m.dev.Close()
+}
+
+func (m *Modem) logCmd(cmd string) {
+	line := fmt.Sprintf(">>> %s\n", cmd)
+	m.log.WriteString(line)
+	log.Printf("[modem] %s send: %s", m.path, cmd)
+}
+
+func (m *Modem) logResp(resp string) {
+	cleaned := cleanResponse(resp)
+	if cleaned != "" {
+		line := fmt.Sprintf("<<< %s\n", cleaned)
+		m.log.WriteString(line)
+		log.Printf("[modem] %s recv: %s", m.path, cleaned)
+	}
 }
 
 // readUntil reads lines until one contains a match string or timeout.
@@ -131,7 +176,6 @@ func (m *Modem) readUntil(timeout time.Duration, matches ...string) (string, err
 	var accumulated strings.Builder
 
 	for time.Now().Before(deadline) {
-		// Set read deadline on the file
 		m.dev.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 		line, err := m.reader.ReadString('\n')
 		accumulated.WriteString(line)
@@ -148,5 +192,13 @@ func (m *Modem) readUntil(timeout time.Duration, matches ...string) (string, err
 		}
 	}
 	m.dev.SetReadDeadline(time.Time{})
-	return accumulated.String(), fmt.Errorf("timeout waiting for response")
+	return accumulated.String(), fmt.Errorf("timeout after %s", timeout)
+}
+
+// cleanResponse strips control chars and excess whitespace from modem output.
+func cleanResponse(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return strings.TrimSpace(s)
 }

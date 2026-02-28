@@ -32,13 +32,11 @@ type ModemResetMsg struct{}
 
 // DialResultMsg is sent after the dial attempt completes.
 type DialResultMsg struct {
-	Result DialResult
-	Modem  *modem.Modem
-	Device string
+	Result     modem.DialResult
+	Transcript string
+	Modem      *modem.Modem
+	Device     string
 }
-
-// DialResult mirrors modem.DialResult for the TUI layer.
-type DialResult = modem.DialResult
 
 // DisconnectMsg is sent when the user disconnects from a session.
 type DisconnectMsg struct{}
