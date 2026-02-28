@@ -25,22 +25,29 @@ RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-in
     ca-certificates \
     psmisc \
     procps \
-    aptitude \
+    pkg-config \
     libc6:i386 \
     && rm -rf /var/lib/apt/lists/*
 
-# Build and Install Asterisk 22 LTS (Minimal PJSIP only)
-# This matches our verified local source build process.
+# Download Asterisk 22 LTS
 WORKDIR /usr/local/src
 RUN wget -q "http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-22-current.tar.gz" \
     && tar xzf asterisk-22-current.tar.gz \
-    && rm asterisk-22-current.tar.gz \
-    && cd asterisk-22.*/ \
-    && ./contrib/scripts/install_prereq install -y \
-    && ./configure --prefix=/usr --with-jansson-bundled --with-pjproject-bundled 2>&1 | tail -5 \
-    && make menuselect.makeopts \
-    && ./menuselect/menuselect --disable-all menuselect.makeopts \
-    && ./menuselect/menuselect \
+    && rm asterisk-22-current.tar.gz
+
+# Install Asterisk prerequisites (non-fatal if aptitude is missing)
+RUN cd asterisk-22.*/ && \
+    DEBIAN_FRONTEND=noninteractive ./contrib/scripts/install_prereq install -y || true
+
+# Configure Asterisk (install to /usr)
+RUN cd asterisk-22.*/ && \
+    ./configure --prefix=/usr --with-jansson-bundled --with-pjproject-bundled 2>&1 | tail -5
+
+# Build Asterisk (Minimal PJSIP only)
+RUN cd asterisk-22.*/ && \
+    make menuselect.makeopts && \
+    ./menuselect/menuselect --disable-all menuselect.makeopts && \
+    ./menuselect/menuselect \
         --enable res_pjproject \
         --enable res_pjsip \
         --enable res_pjsip_authenticator_digest \
@@ -80,10 +87,13 @@ RUN wget -q "http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-22-cu
         --enable bridge_native_rtp \
         --enable func_callerid \
         --enable func_logic \
-        menuselect.makeopts \
-    && make -j$(nproc) \
-    && make install \
-    && cd .. && rm -rf asterisk-22.*/
+        menuselect.makeopts
+
+# Compile and Install Asterisk
+RUN cd asterisk-22.*/ && \
+    make -j$(nproc) && \
+    make install && \
+    rm -rf /usr/local/src/asterisk-22.*/
 
 # Install prebuilt slmodemd/d-modem binaries
 ARG DMODEM_VERSION=v0.1.6
