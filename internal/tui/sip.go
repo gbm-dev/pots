@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"log/slog"
 	"os/exec"
 	"strings"
 	"time"
@@ -27,6 +26,9 @@ type SIPInfo struct {
 	ModemReady  bool   // /dev/ttySL0 exists
 	DModemReady bool   // d-modem process running
 }
+
+// sipStatusMsg carries the result of a SIP registration check.
+type sipStatusMsg SIPInfo
 
 // checkSIPStatus runs health checks for all components.
 func checkSIPStatus() tea.Msg {
