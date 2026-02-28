@@ -2,50 +2,92 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
-var (
-	// Colors — muted, professional palette
-	colorPrimary   = lipgloss.Color("#7D56F4")
-	colorSecondary = lipgloss.Color("#6C6C6C")
-	colorSuccess   = lipgloss.Color("#73D216")
-	colorError     = lipgloss.Color("#FF5555")
-	colorWarning   = lipgloss.Color("#F4BF75")
-	colorMuted     = lipgloss.Color("#555555")
+// Theme contains all colors and styles used by the TUI.
+// Styles are created from the session renderer so ANSI colors render correctly
+// over SSH.
+type Theme struct {
+	renderer *lipgloss.Renderer
 
-	// Styles
-	titleStyle = lipgloss.NewStyle().
+	ColorPrimary   lipgloss.TerminalColor
+	ColorSecondary lipgloss.TerminalColor
+	ColorSuccess   lipgloss.TerminalColor
+	ColorError     lipgloss.TerminalColor
+	ColorWarning   lipgloss.TerminalColor
+	ColorMuted     lipgloss.TerminalColor
+
+	TitleStyle     lipgloss.Style
+	StatusBarStyle lipgloss.Style
+	ErrorStyle     lipgloss.Style
+	SuccessStyle   lipgloss.Style
+	WarningStyle   lipgloss.Style
+	BoxStyle       lipgloss.Style
+	BannerStyle    lipgloss.Style
+	LabelStyle     lipgloss.Style
+	InputStyle     lipgloss.Style
+}
+
+// NewTheme builds a theme bound to the provided renderer.
+func NewTheme(renderer *lipgloss.Renderer) Theme {
+	if renderer == nil {
+		renderer = lipgloss.DefaultRenderer()
+	}
+
+	// Colors — muted, professional palette
+	colorPrimary := lipgloss.Color("#7D56F4")
+	colorSecondary := lipgloss.Color("#6C6C6C")
+	colorSuccess := lipgloss.Color("#73D216")
+	colorError := lipgloss.Color("#FF5555")
+	colorWarning := lipgloss.Color("#F4BF75")
+	colorMuted := lipgloss.Color("#555555")
+
+	return Theme{
+		renderer:       renderer,
+		ColorPrimary:   colorPrimary,
+		ColorSecondary: colorSecondary,
+		ColorSuccess:   colorSuccess,
+		ColorError:     colorError,
+		ColorWarning:   colorWarning,
+		ColorMuted:     colorMuted,
+
+		TitleStyle: renderer.NewStyle().
 			Bold(true).
 			Foreground(colorPrimary).
-			MarginBottom(1)
+			MarginBottom(1),
 
-	statusBarStyle = lipgloss.NewStyle().
+		StatusBarStyle: renderer.NewStyle().
 			Foreground(colorSecondary).
-			MarginTop(1)
+			MarginTop(1),
 
-	errorStyle = lipgloss.NewStyle().
+		ErrorStyle: renderer.NewStyle().
 			Foreground(colorError).
-			Bold(true)
+			Bold(true),
 
-	successStyle = lipgloss.NewStyle().
-			Foreground(colorSuccess)
+		SuccessStyle: renderer.NewStyle().
+			Foreground(colorSuccess),
 
-	warningStyle = lipgloss.NewStyle().
-			Foreground(colorWarning)
+		WarningStyle: renderer.NewStyle().
+			Foreground(colorWarning),
 
-	boxStyle = lipgloss.NewStyle().
+		BoxStyle: renderer.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(colorMuted).
-			Padding(1, 2)
+			Padding(1, 2),
 
-	bannerStyle = lipgloss.NewStyle().
+		BannerStyle: renderer.NewStyle().
 			Bold(true).
 			Foreground(colorWarning).
 			Border(lipgloss.DoubleBorder()).
 			BorderForeground(colorWarning).
-			Padding(0, 1)
+			Padding(0, 1),
 
-	labelStyle = lipgloss.NewStyle().
-			Foreground(colorSecondary)
+		LabelStyle: renderer.NewStyle().
+			Foreground(colorSecondary),
 
-	inputStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF"))
-)
+		InputStyle: renderer.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")),
+	}
+}
+
+func (t Theme) NewStyle() lipgloss.Style {
+	return t.renderer.NewStyle()
+}

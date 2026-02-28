@@ -38,9 +38,6 @@ type DialResultMsg struct {
 	Device     string
 }
 
-// DisconnectMsg is sent when the user disconnects from a session.
-type DisconnectMsg struct{}
-
 // PasswordChangedMsg is sent after a successful password change.
 type PasswordChangedMsg struct{}
 

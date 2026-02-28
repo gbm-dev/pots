@@ -2,6 +2,7 @@ package tui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/gbm-dev/pots/internal/auth"
 	"github.com/gbm-dev/pots/internal/config"
 	"github.com/gbm-dev/pots/internal/modem"
@@ -14,6 +15,7 @@ type Model struct {
 	height   int
 	username string
 	logDir   string
+	theme    Theme
 
 	// Dependencies
 	pool  *modem.Pool
@@ -32,7 +34,7 @@ type Model struct {
 }
 
 // New creates the root TUI model.
-func New(username string, sites []config.Site, pool *modem.Pool, store auth.UserStore, logDir string, forcePassword bool) Model {
+func New(username string, sites []config.Site, pool *modem.Pool, store auth.UserStore, logDir string, forcePassword bool, renderer *lipgloss.Renderer) Model {
 	state := StateMenu
 	if forcePassword {
 		state = StatePasswordChange
@@ -47,12 +49,13 @@ func New(username string, sites []config.Site, pool *modem.Pool, store auth.User
 		sites:    sites,
 		width:    80,
 		height:   24,
+		theme:    NewTheme(renderer),
 	}
 
 	if forcePassword {
-		m.password = NewPasswordModel(username, store)
+		m.password = NewPasswordModel(username, store, m.theme)
 	} else {
-		m.menu = NewMenuModel(sites, username, pool, m.width, m.height)
+		m.menu = NewMenuModel(sites, username, pool, m.width, m.height, m.theme)
 	}
 
 	return m
@@ -107,7 +110,7 @@ func (m Model) View() string {
 func (m Model) updatePasswordChange(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg.(type) {
 	case PasswordChangedMsg:
-		m.menu = NewMenuModel(m.sites, m.username, m.pool, m.width, m.height)
+		m.menu = NewMenuModel(m.sites, m.username, m.pool, m.width, m.height, m.theme)
 		m.state = StateMenu
 		return m, m.menu.Init()
 	case ErrorMsg:
@@ -126,7 +129,7 @@ func (m Model) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case DialRequestMsg:
 		if msg.SiteIndex >= 0 && msg.SiteIndex < len(m.sites) {
 			m.activeSite = m.sites[msg.SiteIndex]
-			m.dialing = NewDialingModel(m.activeSite, m.pool)
+			m.dialing = NewDialingModel(m.activeSite, m.pool, m.theme)
 			m.state = StateDialing
 			return m, m.dialing.Init()
 		}
@@ -150,8 +153,12 @@ func (m Model) updateDialing(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return TerminalDoneMsg{Err: err}
 			})
 		}
-	case DisconnectMsg:
-		return m.returnToMenu()
+	case tea.KeyMsg:
+		// Keep this transition in the root model to avoid async command hops
+		// when leaving the failed-dial screen.
+		if msg.String() == "ctrl+c" || (m.dialing.done && msg.String() == "enter") {
+			return m.returnToMenu()
+		}
 	case ErrorMsg:
 		// Let dialing model handle it for display
 	}
@@ -170,7 +177,7 @@ func (m Model) updateConnected(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) returnToMenu() (tea.Model, tea.Cmd) {
-	m.menu = NewMenuModel(m.sites, m.username, m.pool, m.width, m.height)
+	m.menu = NewMenuModel(m.sites, m.username, m.pool, m.width, m.height, m.theme)
 	m.state = StateMenu
 	m.activeModem = nil
 	m.activeDevice = ""

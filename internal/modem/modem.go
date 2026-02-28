@@ -14,7 +14,7 @@ import (
 type DialResult int
 
 const (
-	ResultConnect    DialResult = iota
+	ResultConnect DialResult = iota
 	ResultBusy
 	ResultNoCarrier
 	ResultNoDialtone
@@ -70,25 +70,40 @@ func Open(devicePath string) (*Modem, error) {
 	return m, nil
 }
 
-// Reset sends ATZ and waits for OK.
-func (m *Modem) Reset(timeout time.Duration) error {
-	m.logCmd("ATZ")
-	if _, err := m.dev.Write([]byte("ATZ\r")); err != nil {
-		return fmt.Errorf("sending ATZ: %w", err)
+// Init sends ATE0 (disable echo) and ATZ (reset). Call after Open.
+func (m *Modem) Init(timeout time.Duration) error {
+	// Drain any stale data in the buffer
+	m.drain()
+
+	// Disable echo first — reduces noise in subsequent responses
+	resp, err := m.runAT("ATE0", timeout, "OK", "ERROR")
+	if err != nil {
+		return fmt.Errorf("ATE0: no response (%w)", err)
 	}
-	resp, err := m.readUntil(timeout, "OK", "ERROR")
-	m.logResp(resp)
+	if strings.Contains(resp, "ERROR") {
+		return fmt.Errorf("ATE0 returned ERROR: %s", cleanResponse(resp))
+	}
+	m.drain()
+
+	// Reset modem
+	resp, err = m.runAT("ATZ", timeout, "OK", "ERROR")
 	if err != nil {
 		return fmt.Errorf("ATZ: no response (%w)", err)
 	}
 	if strings.Contains(resp, "ERROR") {
 		return fmt.Errorf("ATZ returned ERROR: %s", cleanResponse(resp))
 	}
+
+	// Drain again after reset to clear any echo/noise
+	m.drain()
 	return nil
 }
 
 // Dial sends ATDT and returns the result with full transcript.
 func (m *Modem) Dial(phone string, timeout time.Duration) (DialResponse, error) {
+	// Drain before dialing to ensure clean buffer
+	m.drain()
+
 	cmd := fmt.Sprintf("ATDT%s", phone)
 	m.logCmd(cmd)
 	if _, err := m.dev.Write([]byte(cmd + "\r")); err != nil {
@@ -155,6 +170,24 @@ func (m *Modem) Close() error {
 	return m.dev.Close()
 }
 
+// drain reads and discards any buffered data from the modem.
+func (m *Modem) drain() {
+	m.dev.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	buf := make([]byte, 1024)
+	for {
+		n, err := m.dev.Read(buf)
+		if n > 0 {
+			log.Printf("[modem] %s drain: %d bytes", m.path, n)
+		}
+		if err != nil {
+			break
+		}
+	}
+	m.dev.SetReadDeadline(time.Time{})
+	// Reset the bufio reader since we read directly from dev
+	m.reader.Reset(m.dev)
+}
+
 func (m *Modem) logCmd(cmd string) {
 	line := fmt.Sprintf(">>> %s\n", cmd)
 	m.log.WriteString(line)
@@ -168,6 +201,16 @@ func (m *Modem) logResp(resp string) {
 		m.log.WriteString(line)
 		log.Printf("[modem] %s recv: %s", m.path, cleaned)
 	}
+}
+
+func (m *Modem) runAT(cmd string, timeout time.Duration, matches ...string) (string, error) {
+	m.logCmd(cmd)
+	if _, err := m.dev.Write([]byte(cmd + "\r")); err != nil {
+		return "", fmt.Errorf("sending %s: %w", cmd, err)
+	}
+	resp, err := m.readUntil(timeout, matches...)
+	m.logResp(resp)
+	return resp, err
 }
 
 // readUntil reads lines until one contains a match string or timeout.

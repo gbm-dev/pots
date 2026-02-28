@@ -94,7 +94,8 @@ func (s *Server) teaHandler(sshSession ssh.Session) (tea.Model, []tea.ProgramOpt
 		forceChange = false
 	}
 
-	model := tui.New(username, s.sites, s.pool, s.store, s.logDir, forceChange)
+	renderer := bubbletea.MakeRenderer(sshSession)
+	model := tui.New(username, s.sites, s.pool, s.store, s.logDir, forceChange, renderer)
 
 	return model, []tea.ProgramOption{tea.WithAltScreen()}
 }

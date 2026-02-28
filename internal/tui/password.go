@@ -19,10 +19,11 @@ type PasswordModel struct {
 	err             string
 	username        string
 	store           auth.UserStore
+	theme           Theme
 }
 
 // NewPasswordModel creates a password change form.
-func NewPasswordModel(username string, store auth.UserStore) PasswordModel {
+func NewPasswordModel(username string, store auth.UserStore, theme Theme) PasswordModel {
 	np := textinput.New()
 	np.Placeholder = "New password (min 8 chars)"
 	np.EchoMode = textinput.EchoPassword
@@ -39,6 +40,7 @@ func NewPasswordModel(username string, store auth.UserStore) PasswordModel {
 		confirmPassword: cp,
 		username:        username,
 		store:           store,
+		theme:           theme,
 	}
 }
 
@@ -88,22 +90,22 @@ func (m PasswordModel) Update(msg tea.Msg) (PasswordModel, tea.Cmd) {
 func (m PasswordModel) View() string {
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render("Password Change Required"))
+	b.WriteString(m.theme.TitleStyle.Render("Password Change Required"))
 	b.WriteString("\n\n")
-	b.WriteString(labelStyle.Render("  You must set a new password before continuing."))
+	b.WriteString(m.theme.LabelStyle.Render("  You must set a new password before continuing."))
 	b.WriteString("\n\n")
 	b.WriteString(fmt.Sprintf("  New password:     %s\n", m.newPassword.View()))
 	b.WriteString(fmt.Sprintf("  Confirm password: %s\n", m.confirmPassword.View()))
 
 	if m.err != "" {
 		b.WriteString("\n")
-		b.WriteString(errorStyle.Render("  " + m.err))
+		b.WriteString(m.theme.ErrorStyle.Render("  " + m.err))
 	}
 
 	b.WriteString("\n\n")
-	b.WriteString(labelStyle.Render("  Tab to switch fields | Enter to submit"))
+	b.WriteString(m.theme.LabelStyle.Render("  Tab to switch fields | Enter to submit"))
 
-	return boxStyle.Render(b.String())
+	return m.theme.BoxStyle.Render(b.String())
 }
 
 func (m PasswordModel) submit() tea.Cmd {

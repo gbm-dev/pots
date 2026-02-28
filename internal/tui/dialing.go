@@ -6,7 +6,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/gbm-dev/pots/internal/config"
 	"github.com/gbm-dev/pots/internal/modem"
 )
@@ -24,18 +23,20 @@ type DialingModel struct {
 	err        error
 	done       bool
 	pool       *modem.Pool
+	theme      Theme
 }
 
 // NewDialingModel creates a dialing view for the given site.
-func NewDialingModel(site config.Site, pool *modem.Pool) DialingModel {
+func NewDialingModel(site config.Site, pool *modem.Pool, theme Theme) DialingModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = warningStyle
+	s.Style = theme.WarningStyle
 	return DialingModel{
 		spinner: s,
 		site:    site,
 		status:  "Acquiring modem port...",
 		pool:    pool,
+		theme:   theme,
 	}
 }
 
@@ -56,7 +57,7 @@ func (m DialingModel) Update(msg tea.Msg) (DialingModel, tea.Cmd) {
 
 	case DialResultMsg:
 		if msg.Result == modem.ResultConnect {
-			m.status = successStyle.Render("CONNECTED")
+			m.status = m.theme.SuccessStyle.Render("CONNECTED")
 			m.device = msg.Device
 			return m, nil
 		}
@@ -70,21 +71,13 @@ func (m DialingModel) Update(msg tea.Msg) (DialingModel, tea.Cmd) {
 		m.done = true
 		m.err = msg.Err
 		return m, nil
-
-	case tea.KeyMsg:
-		if m.done && msg.String() == "enter" {
-			return m, func() tea.Msg { return DisconnectMsg{} }
-		}
-		if msg.String() == "ctrl+c" {
-			return m, func() tea.Msg { return DisconnectMsg{} }
-		}
 	}
 
 	return m, nil
 }
 
 func (m DialingModel) View() string {
-	header := titleStyle.Render(fmt.Sprintf("Connecting to %s", m.site.Name))
+	header := m.theme.TitleStyle.Render(fmt.Sprintf("Connecting to %s", m.site.Name))
 
 	details := fmt.Sprintf(
 		"  Phone:  %s\n  Baud:   %d\n  Device: %s",
@@ -92,16 +85,16 @@ func (m DialingModel) View() string {
 
 	if m.err != nil {
 		view := header + "\n\n" + details + "\n\n" +
-			errorStyle.Render(fmt.Sprintf("  Error: %s", m.err))
+			m.theme.ErrorStyle.Render(fmt.Sprintf("  Error: %s", m.err))
 		if m.transcript != "" {
-			view += "\n\n" + labelStyle.Render("  AT log:") + "\n" +
-				lipgloss.NewStyle().Foreground(colorMuted).PaddingLeft(4).Render(m.transcript)
+			view += "\n\n" + m.theme.LabelStyle.Render("  AT log:") + "\n" +
+				m.theme.NewStyle().Foreground(m.theme.ColorMuted).PaddingLeft(4).Render(m.transcript)
 		}
-		view += "\n\n" + labelStyle.Render("  Press Enter to return to menu")
-		return boxStyle.Render(view)
+		view += "\n\n" + m.theme.LabelStyle.Render("  Press Enter to return to menu")
+		return m.theme.BoxStyle.Render(view)
 	}
 
-	return boxStyle.Render(
+	return m.theme.BoxStyle.Render(
 		header + "\n\n" + details + "\n\n" +
 			fmt.Sprintf("  %s %s", m.spinner.View(), m.status),
 	)
@@ -131,11 +124,11 @@ func (m DialingModel) acquireAndDial() tea.Cmd {
 			return ErrorMsg{Err: fmt.Errorf("failed to open %s: %w", dev, err), Context: "open"}
 		}
 
-		// Step 3: Reset modem (ATZ)
-		if err := mdm.Reset(resetTimeout); err != nil {
+		// Step 3: Initialize modem (ATE0 + ATZ)
+		if err := mdm.Init(resetTimeout); err != nil {
 			mdm.Close()
 			m.pool.Release(dev)
-			return ErrorMsg{Err: fmt.Errorf("modem reset failed: %w", err), Context: "reset"}
+			return ErrorMsg{Err: fmt.Errorf("modem init failed: %w", err), Context: "init"}
 		}
 
 		// Step 4: Dial

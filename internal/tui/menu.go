@@ -24,7 +24,9 @@ func (i siteItem) Description() string { return i.site.Description }
 func (i siteItem) FilterValue() string { return i.site.Name + " " + i.site.Description }
 
 // siteDelegate renders site items in the list.
-type siteDelegate struct{}
+type siteDelegate struct {
+	theme Theme
+}
 
 func (d siteDelegate) Height() int                             { return 1 }
 func (d siteDelegate) Spacing() int                            { return 0 }
@@ -41,25 +43,25 @@ func (d siteDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 	// Status indicator
 	status := "  "
 	if si.active {
-		status = lipgloss.NewStyle().Foreground(colorSuccess).Render("● ")
+		status = d.theme.NewStyle().Foreground(d.theme.ColorSuccess).Render("● ")
 	}
 
 	// Cursor
 	cursor := "  "
 	if isSelected {
-		cursor = lipgloss.NewStyle().Foreground(colorPrimary).Render("> ")
+		cursor = d.theme.NewStyle().Foreground(d.theme.ColorPrimary).Render("> ")
 	}
 
 	// Name
 	var nameStyle lipgloss.Style
 	if isSelected {
-		nameStyle = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+		nameStyle = d.theme.NewStyle().Foreground(d.theme.ColorPrimary).Bold(true)
 	} else {
-		nameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC"))
+		nameStyle = d.theme.NewStyle().Foreground(lipgloss.Color("#CCCCCC"))
 	}
 
 	// Description + baud — dimmed, separated
-	detail := lipgloss.NewStyle().Foreground(colorMuted).Render(
+	detail := d.theme.NewStyle().Foreground(d.theme.ColorMuted).Render(
 		fmt.Sprintf(" — %s (%d baud)", si.site.Description, si.site.BaudRate))
 
 	fmt.Fprintf(w, "%s%s%s%s", cursor, status, nameStyle.Render(si.site.Name), detail)
@@ -73,11 +75,12 @@ type MenuModel struct {
 	username   string
 	freePorts  int
 	totalPorts int
-	sipInfo SIPInfo
+	sipInfo    SIPInfo
+	theme      Theme
 }
 
 // NewMenuModel creates the site selection menu.
-func NewMenuModel(sites []config.Site, username string, pool *modem.Pool, width, height int) MenuModel {
+func NewMenuModel(sites []config.Site, username string, pool *modem.Pool, width, height int, theme Theme) MenuModel {
 	free, total := pool.Available()
 	active := pool.ActiveSites()
 
@@ -86,9 +89,9 @@ func NewMenuModel(sites []config.Site, username string, pool *modem.Pool, width,
 		items[i] = siteItem{site: s, index: i, active: active[s.Name]}
 	}
 
-	l := list.New(items, siteDelegate{}, width, height-4)
+	l := list.New(items, siteDelegate{theme: theme}, width, height-4)
 	l.Title = "OOB Console Hub"
-	l.Styles.Title = titleStyle
+	l.Styles.Title = theme.TitleStyle
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(true)
 	l.SetShowHelp(false)
@@ -100,6 +103,7 @@ func NewMenuModel(sites []config.Site, username string, pool *modem.Pool, width,
 		username:   username,
 		freePorts:  free,
 		totalPorts: total,
+		theme:      theme,
 	}
 }
 
@@ -153,22 +157,22 @@ func (m MenuModel) View() string {
 		if m.sipInfo.Server != "" {
 			sipText += " → " + m.sipInfo.Server
 		}
-		parts = append(parts, successStyle.Render(sipText))
+		parts = append(parts, m.theme.SuccessStyle.Render(sipText))
 	case SIPUnregistered:
 		sipText := "● SIP not registered"
 		if m.sipInfo.Trunk != "" {
 			sipText = "● " + m.sipInfo.Trunk + " not registered"
 		}
-		parts = append(parts, errorStyle.Render(sipText))
+		parts = append(parts, m.theme.ErrorStyle.Render(sipText))
 	default:
-		parts = append(parts, labelStyle.Render("○ SIP checking..."))
+		parts = append(parts, m.theme.LabelStyle.Render("○ SIP checking..."))
 	}
 
-	parts = append(parts, labelStyle.Render(fmt.Sprintf("%d/%d ports", m.freePorts, m.totalPorts)))
-	parts = append(parts, labelStyle.Render(m.username))
-	parts = append(parts, labelStyle.Render("enter connect · q quit"))
+	parts = append(parts, m.theme.LabelStyle.Render(fmt.Sprintf("%d/%d ports", m.freePorts, m.totalPorts)))
+	parts = append(parts, m.theme.LabelStyle.Render(m.username))
+	parts = append(parts, m.theme.LabelStyle.Render("enter connect · q quit"))
 
-	footer := statusBarStyle.Render("  " + strings.Join(parts, "  │  "))
+	footer := m.theme.StatusBarStyle.Render("  " + strings.Join(parts, "  │  "))
 	return m.list.View() + "\n" + footer
 }
 
