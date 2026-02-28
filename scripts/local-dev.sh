@@ -163,8 +163,16 @@ for i in $(seq 1 10); do
     sleep 1
 done
 
+# --- Kill anything holding port 5060 (stale Asterisk, etc.) ---
+STALE_PID=$(ss -tlnup 'sport = :5060' 2>/dev/null | grep -oP 'pid=\K[0-9]+' | head -1)
+if [[ -n "${STALE_PID:-}" ]]; then
+    echo "  Killing stale process on port 5060 (PID ${STALE_PID})..."
+    sudo kill "${STALE_PID}" 2>/dev/null || true
+    sleep 1
+fi
+
 # --- Start Asterisk ---
-echo "Starting Asterisk (verbose=5, debug=2)..."
+echo "Starting Asterisk..."
 AST_CONF_PATH="${ASTERISK_TMP}/asterisk.conf"
 printf '%s\n' "${AST_CONF_PATH}" > "${AST_RUNTIME_CONF_FILE}"
 asterisk -f -C "${AST_CONF_PATH}" &>"${AST_LOG}" &
@@ -172,7 +180,7 @@ PIDS+=($!)
 echo "  Asterisk PID: ${PIDS[-1]}"
 echo "  Asterisk log: ${AST_LOG}"
 
-sleep 3
+sleep 2
 if ! kill -0 "${PIDS[-1]}" 2>/dev/null; then
     echo "ERROR: Asterisk failed to start! Check ${AST_LOG}"
     tail -20 "$AST_LOG"
@@ -182,17 +190,20 @@ fi
 # --- Enable SIP debug logging ---
 ast_cli "pjsip set logger on" 2>/dev/null || true
 
-# --- Wait for Telnyx registration ---
+# --- Wait for Telnyx registration (required for outbound calls) ---
 echo ""
 echo "Waiting for Telnyx SIP registration..."
-for i in $(seq 1 15); do
+for i in $(seq 1 30); do
     REG_STATUS=$(ast_cli "pjsip show registrations" 2>/dev/null || true)
     if echo "$REG_STATUS" | grep -q "Registered"; then
         echo "  Telnyx registered."
         break
     fi
-    if [ "$i" -eq 15 ]; then
-        echo "  WARNING: Telnyx not registered after 15s (will keep trying in background)"
+    if [ "$i" -eq 30 ]; then
+        echo "  ERROR: Telnyx not registered after 30s."
+        echo "  Check credentials and network. Asterisk log:"
+        grep -i 'error\|transport\|register\|401\|403' "$AST_LOG" | tail -10
+        exit 1
     fi
     sleep 1
 done
