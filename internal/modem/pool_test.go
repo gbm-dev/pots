@@ -1,26 +1,16 @@
 package modem
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 )
 
-func setupFakeDevices(t *testing.T, count int) string {
-	t.Helper()
-	// We can't create real /dev entries, so we test the pool logic
-	// by creating a pool with a custom helper
-	return t.TempDir()
-}
-
 func TestPoolAcquireRelease(t *testing.T) {
-	// Create a pool with fake devices by injecting directly
-	p := &Pool{devices: map[string]bool{
-		"/dev/ttyIAX0": false,
-		"/dev/ttyIAX1": false,
+	p := &Pool{devices: map[string]string{
+		"/dev/ttyIAX0": "",
+		"/dev/ttyIAX1": "",
 	}}
 
-	dev1, err := p.Acquire()
+	dev1, err := p.Acquire("site-a")
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
@@ -28,7 +18,7 @@ func TestPoolAcquireRelease(t *testing.T) {
 		t.Fatal("expected non-empty device")
 	}
 
-	dev2, err := p.Acquire()
+	dev2, err := p.Acquire("site-b")
 	if err != nil {
 		t.Fatalf("Acquire second: %v", err)
 	}
@@ -37,14 +27,14 @@ func TestPoolAcquireRelease(t *testing.T) {
 	}
 
 	// All in use
-	_, err = p.Acquire()
+	_, err = p.Acquire("site-c")
 	if err == nil {
 		t.Error("expected error when all devices in use")
 	}
 
 	// Release one
 	p.Release(dev1)
-	dev3, err := p.Acquire()
+	dev3, err := p.Acquire("site-a")
 	if err != nil {
 		t.Fatalf("Acquire after release: %v", err)
 	}
@@ -54,10 +44,10 @@ func TestPoolAcquireRelease(t *testing.T) {
 }
 
 func TestPoolAvailable(t *testing.T) {
-	p := &Pool{devices: map[string]bool{
-		"/dev/ttyIAX0": false,
-		"/dev/ttyIAX1": false,
-		"/dev/ttyIAX2": true,
+	p := &Pool{devices: map[string]string{
+		"/dev/ttyIAX0": "",
+		"/dev/ttyIAX1": "",
+		"/dev/ttyIAX2": "some-site",
 	}}
 
 	free, total := p.Available()
@@ -69,20 +59,26 @@ func TestPoolAvailable(t *testing.T) {
 	}
 }
 
-func TestNewPoolWithRealFiles(t *testing.T) {
-	// Create temp "devices" to test NewPool file existence check
-	dir := t.TempDir()
+func TestPoolActiveSites(t *testing.T) {
+	p := &Pool{devices: map[string]string{
+		"/dev/ttyIAX0": "site-a",
+		"/dev/ttyIAX1": "",
+		"/dev/ttyIAX2": "site-b",
+	}}
 
-	// Create fake ttyIAX files
-	for i := 0; i < 3; i++ {
-		f, _ := os.Create(filepath.Join(dir, "ttyIAX"))
-		f.Close()
+	active := p.ActiveSites()
+	if len(active) != 2 {
+		t.Errorf("expected 2 active sites, got %d", len(active))
 	}
+	if !active["site-a"] || !active["site-b"] {
+		t.Errorf("unexpected active sites: %v", active)
+	}
+}
 
+func TestNewPoolWithRealFiles(t *testing.T) {
 	// NewPool checks /dev/ttyIAX* which won't exist in tests
 	p := NewPool(4)
 	_, total := p.Available()
-	// On a dev machine without IAXmodem, expect 0 devices
 	if total != 0 {
 		t.Logf("found %d real devices (expected on dev machine)", total)
 	}

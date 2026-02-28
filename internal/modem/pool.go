@@ -9,30 +9,30 @@ import (
 // Pool manages a set of IAXmodem PTY devices.
 type Pool struct {
 	mu      sync.Mutex
-	devices map[string]bool // device path → in-use
+	devices map[string]string // device path → site name ("" = free)
 }
 
 // NewPool creates a pool with modemCount devices (/dev/ttyIAX0 through ttyIAX{n-1}).
 // Only devices that exist on the filesystem are added to the pool.
 func NewPool(modemCount int) *Pool {
-	devices := make(map[string]bool)
+	devices := make(map[string]string)
 	for i := 0; i < modemCount; i++ {
 		dev := fmt.Sprintf("/dev/ttyIAX%d", i)
 		if _, err := os.Stat(dev); err == nil {
-			devices[dev] = false
+			devices[dev] = ""
 		}
 	}
 	return &Pool{devices: devices}
 }
 
 // Acquire returns the first available device, or an error if none are free.
-func (p *Pool) Acquire() (string, error) {
+func (p *Pool) Acquire(siteName string) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	for dev, inUse := range p.devices {
-		if !inUse {
-			p.devices[dev] = true
+	for dev, site := range p.devices {
+		if site == "" {
+			p.devices[dev] = siteName
 			return dev, nil
 		}
 	}
@@ -43,7 +43,7 @@ func (p *Pool) Acquire() (string, error) {
 func (p *Pool) Release(dev string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.devices[dev] = false
+	p.devices[dev] = ""
 }
 
 // Available returns the count of free and total devices.
@@ -52,10 +52,24 @@ func (p *Pool) Available() (free, total int) {
 	defer p.mu.Unlock()
 
 	total = len(p.devices)
-	for _, inUse := range p.devices {
-		if !inUse {
+	for _, site := range p.devices {
+		if site == "" {
 			free++
 		}
 	}
 	return
+}
+
+// ActiveSites returns the set of site names currently connected.
+func (p *Pool) ActiveSites() map[string]bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	active := make(map[string]bool)
+	for _, site := range p.devices {
+		if site != "" {
+			active[site] = true
+		}
+	}
+	return active
 }

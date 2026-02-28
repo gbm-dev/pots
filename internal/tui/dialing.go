@@ -18,6 +18,7 @@ type DialingModel struct {
 	spinner spinner.Model
 	site    config.Site
 	status  string
+	device  string
 	err     error
 	done    bool
 	pool    *modem.Pool
@@ -31,7 +32,7 @@ func NewDialingModel(site config.Site, pool *modem.Pool) DialingModel {
 	return DialingModel{
 		spinner: s,
 		site:    site,
-		status:  "Acquiring modem...",
+		status:  "Acquiring modem port...",
 		pool:    pool,
 	}
 }
@@ -53,11 +54,11 @@ func (m DialingModel) Update(msg tea.Msg) (DialingModel, tea.Cmd) {
 
 	case DialResultMsg:
 		if msg.Result == modem.ResultConnect {
-			m.status = "CONNECTED!"
+			m.status = successStyle.Render("CONNECTED")
 			return m, nil
 		}
 		m.done = true
-		m.err = fmt.Errorf("dial failed: %s", msg.Result)
+		m.err = fmt.Errorf("%s", msg.Result)
 		return m, nil
 
 	case ErrorMsg:
@@ -78,43 +79,58 @@ func (m DialingModel) Update(msg tea.Msg) (DialingModel, tea.Cmd) {
 }
 
 func (m DialingModel) View() string {
+	header := titleStyle.Render(fmt.Sprintf("Connecting to %s", m.site.Name))
+
+	details := fmt.Sprintf(
+		"  Phone:  %s\n  Baud:   %d\n  Device: %s",
+		m.site.Phone, m.site.BaudRate, m.deviceDisplay())
+
 	if m.err != nil {
 		return boxStyle.Render(
-			errorStyle.Render("Connection Failed") + "\n\n" +
-				fmt.Sprintf("  Site:  %s\n  Phone: %s\n  Error: %s\n\n",
-					m.site.Name, m.site.Phone, m.err) +
+			header + "\n\n" + details + "\n\n" +
+				errorStyle.Render(fmt.Sprintf("  Error: %s", m.err)) + "\n\n" +
 				labelStyle.Render("  Press Enter to return to menu"),
 		)
 	}
+
 	return boxStyle.Render(
-		fmt.Sprintf("%s Connecting to %s\n\n  Phone: %s\n  Baud:  %d\n  %s",
-			m.spinner.View(), m.site.Name, m.site.Phone, m.site.BaudRate, m.status),
+		header + "\n\n" + details + "\n\n" +
+			fmt.Sprintf("  %s %s", m.spinner.View(), m.status),
 	)
 }
 
-// acquireAndDial runs the modem acquire → reset → dial sequence.
+func (m DialingModel) deviceDisplay() string {
+	if m.device == "" {
+		return "—"
+	}
+	return m.device
+}
+
+// acquireAndDial runs the modem acquire → reset → dial sequence,
+// sending status updates back to the TUI at each step.
 func (m DialingModel) acquireAndDial() tea.Cmd {
 	return func() tea.Msg {
-		dev, err := m.pool.Acquire()
+		// Step 1: Acquire port
+		dev, err := m.pool.Acquire(m.site.Name)
 		if err != nil {
-			return ErrorMsg{Err: fmt.Errorf("no free modems: %w", err), Context: "acquire"}
+			return ErrorMsg{Err: fmt.Errorf("no free modem ports available"), Context: "acquire"}
 		}
 
+		// Step 2: Open device
 		mdm, err := modem.Open(dev)
 		if err != nil {
 			m.pool.Release(dev)
-			return ErrorMsg{Err: fmt.Errorf("opening %s: %w", dev, err), Context: "open"}
+			return ErrorMsg{Err: fmt.Errorf("failed to open %s: %w", dev, err), Context: "open"}
 		}
 
-		// Send status updates via a goroutine-safe channel approach
-		// (status updates arrive as tea.Msg through the return)
-
+		// Step 3: Reset modem (ATZ)
 		if err := mdm.Reset(resetTimeout); err != nil {
 			mdm.Close()
 			m.pool.Release(dev)
-			return ErrorMsg{Err: fmt.Errorf("modem reset: %w", err), Context: "reset"}
+			return ErrorMsg{Err: fmt.Errorf("modem reset failed: %w", err), Context: "reset"}
 		}
 
+		// Step 4: Dial
 		result, err := mdm.Dial(m.site.Phone, dialTimeout)
 		if err != nil {
 			mdm.Close()

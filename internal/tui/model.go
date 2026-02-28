@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/gbm-dev/pots/internal/auth"
 	"github.com/gbm-dev/pots/internal/config"
@@ -54,8 +52,7 @@ func New(username string, sites []config.Site, pool *modem.Pool, store auth.User
 	if forcePassword {
 		m.password = NewPasswordModel(username, store)
 	} else {
-		free, total := pool.Available()
-		m.menu = NewMenuModel(sites, username, free, total, m.width, m.height)
+		m.menu = NewMenuModel(sites, username, pool, m.width, m.height)
 	}
 
 	return m
@@ -110,8 +107,7 @@ func (m Model) View() string {
 func (m Model) updatePasswordChange(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg.(type) {
 	case PasswordChangedMsg:
-		free, total := m.pool.Available()
-		m.menu = NewMenuModel(m.sites, m.username, free, total, m.width, m.height)
+		m.menu = NewMenuModel(m.sites, m.username, m.pool, m.width, m.height)
 		m.state = StateMenu
 		return m, m.menu.Init()
 	case ErrorMsg:
@@ -174,18 +170,13 @@ func (m Model) updateConnected(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) returnToMenu() (tea.Model, tea.Cmd) {
-	free, total := m.pool.Available()
-	m.menu = NewMenuModel(m.sites, m.username, free, total, m.width, m.height)
+	m.menu = NewMenuModel(m.sites, m.username, m.pool, m.width, m.height)
 	m.state = StateMenu
 	m.activeModem = nil
 	m.activeDevice = ""
 
-	// Clear screen and show menu
 	return m, tea.Batch(
 		tea.ClearScreen,
 		m.menu.Init(),
-		func() tea.Msg {
-			return statusMsg(fmt.Sprintf("Returned to menu. %d/%d ports available.", free, total))
-		},
 	)
 }

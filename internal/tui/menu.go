@@ -3,27 +3,30 @@ package tui
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/gbm-dev/pots/internal/config"
+	"github.com/gbm-dev/pots/internal/modem"
 )
 
 // siteItem implements list.Item for the site selector.
 type siteItem struct {
-	site  config.Site
-	index int
+	site   config.Site
+	index  int
+	active bool // currently connected by someone
 }
 
 func (i siteItem) Title() string       { return i.site.Name }
-func (i siteItem) Description() string { return fmt.Sprintf("%s (%d baud)", i.site.Description, i.site.BaudRate) }
+func (i siteItem) Description() string { return i.site.Description }
 func (i siteItem) FilterValue() string { return i.site.Name + " " + i.site.Description }
 
 // siteDelegate renders site items in the list.
 type siteDelegate struct{}
 
-func (d siteDelegate) Height() int                             { return 2 }
+func (d siteDelegate) Height() int                             { return 1 }
 func (d siteDelegate) Spacing() int                            { return 0 }
 func (d siteDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
@@ -35,44 +38,55 @@ func (d siteDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 
 	isSelected := index == m.Index()
 
-	var nameStyle, descStyle lipgloss.Style
-	if isSelected {
-		nameStyle = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).PaddingLeft(2)
-		descStyle = lipgloss.NewStyle().Foreground(colorSecondary).PaddingLeft(4)
-	} else {
-		nameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC")).PaddingLeft(2)
-		descStyle = lipgloss.NewStyle().Foreground(colorMuted).PaddingLeft(4)
+	// Status indicator
+	status := "  "
+	if si.active {
+		status = lipgloss.NewStyle().Foreground(colorSuccess).Render("● ")
 	}
 
+	// Cursor
 	cursor := "  "
 	if isSelected {
-		cursor = "> "
+		cursor = lipgloss.NewStyle().Foreground(colorPrimary).Render("> ")
 	}
 
-	fmt.Fprintf(w, "%s%s\n%s\n",
-		cursor,
-		nameStyle.Render(si.site.Name),
-		descStyle.Render(si.Description()),
-	)
+	// Name
+	var nameStyle lipgloss.Style
+	if isSelected {
+		nameStyle = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	} else {
+		nameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC"))
+	}
+
+	// Description + baud — dimmed, separated
+	detail := lipgloss.NewStyle().Foreground(colorMuted).Render(
+		fmt.Sprintf(" — %s (%d baud)", si.site.Description, si.site.BaudRate))
+
+	fmt.Fprintf(w, "%s%s%s%s", cursor, status, nameStyle.Render(si.site.Name), detail)
 }
 
 // MenuModel is the site selection view.
 type MenuModel struct {
-	list     list.Model
-	sites    []config.Site
-	username string
-	freePorts int
+	list       list.Model
+	sites      []config.Site
+	pool       *modem.Pool
+	username   string
+	freePorts  int
 	totalPorts int
+	sipStatus  SIPStatus
 }
 
 // NewMenuModel creates the site selection menu.
-func NewMenuModel(sites []config.Site, username string, free, total int, width, height int) MenuModel {
+func NewMenuModel(sites []config.Site, username string, pool *modem.Pool, width, height int) MenuModel {
+	free, total := pool.Available()
+	active := pool.ActiveSites()
+
 	items := make([]list.Item, len(sites))
 	for i, s := range sites {
-		items[i] = siteItem{site: s, index: i}
+		items[i] = siteItem{site: s, index: i, active: active[s.Name]}
 	}
 
-	l := list.New(items, siteDelegate{}, width, height-6)
+	l := list.New(items, siteDelegate{}, width, height-4)
 	l.Title = "OOB Console Hub"
 	l.Styles.Title = titleStyle
 	l.SetShowStatusBar(false)
@@ -82,17 +96,27 @@ func NewMenuModel(sites []config.Site, username string, free, total int, width, 
 	return MenuModel{
 		list:       l,
 		sites:      sites,
+		pool:       pool,
 		username:   username,
 		freePorts:  free,
 		totalPorts: total,
 	}
 }
 
-func (m MenuModel) Init() tea.Cmd { return nil }
+func (m MenuModel) Init() tea.Cmd {
+	return tea.Batch(
+		func() tea.Msg { return checkSIPStatus() },
+		sipTick(),
+	)
+}
 
 func (m MenuModel) Update(msg tea.Msg) (MenuModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Don't intercept keys while filtering
+		if m.list.FilterState() == list.Filtering {
+			break
+		}
 		switch msg.String() {
 		case "enter":
 			if i, ok := m.list.SelectedItem().(siteItem); ok {
@@ -102,7 +126,15 @@ func (m MenuModel) Update(msg tea.Msg) (MenuModel, tea.Cmd) {
 			return m, tea.Quit
 		}
 	case tea.WindowSizeMsg:
-		m.list.SetSize(msg.Width, msg.Height-6)
+		m.list.SetSize(msg.Width, msg.Height-4)
+	case sipStatusMsg:
+		m.sipStatus = SIPStatus(msg)
+		return m, nil
+	case sipTickMsg:
+		return m, tea.Batch(
+			func() tea.Msg { return checkSIPStatus() },
+			sipTick(),
+		)
 	}
 
 	var cmd tea.Cmd
@@ -111,14 +143,35 @@ func (m MenuModel) Update(msg tea.Msg) (MenuModel, tea.Cmd) {
 }
 
 func (m MenuModel) View() string {
-	footer := statusBarStyle.Render(
-		fmt.Sprintf("  %s | %d/%d ports available | q quit | enter connect",
-			m.username, m.freePorts, m.totalPorts))
+	// Status bar
+	var parts []string
+
+	// SIP status with color
+	switch m.sipStatus {
+	case SIPRegistered:
+		parts = append(parts, successStyle.Render("● SIP registered"))
+	case SIPUnregistered:
+		parts = append(parts, errorStyle.Render("● SIP unregistered"))
+	default:
+		parts = append(parts, labelStyle.Render("○ SIP checking..."))
+	}
+
+	parts = append(parts, labelStyle.Render(fmt.Sprintf("%d/%d ports", m.freePorts, m.totalPorts)))
+	parts = append(parts, labelStyle.Render(m.username))
+	parts = append(parts, labelStyle.Render("enter connect · q quit"))
+
+	footer := statusBarStyle.Render("  " + strings.Join(parts, "  │  "))
 	return m.list.View() + "\n" + footer
 }
 
-// UpdatePorts refreshes the port availability counts.
-func (m *MenuModel) UpdatePorts(free, total int) {
-	m.freePorts = free
-	m.totalPorts = total
+// refreshItems updates the list items with current active status.
+func (m *MenuModel) refreshItems() {
+	active := m.pool.ActiveSites()
+	m.freePorts, m.totalPorts = m.pool.Available()
+
+	items := make([]list.Item, len(m.sites))
+	for i, s := range m.sites {
+		items[i] = siteItem{site: s, index: i, active: active[s.Name]}
+	}
+	m.list.SetItems(items)
 }
