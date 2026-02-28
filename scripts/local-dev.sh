@@ -67,7 +67,7 @@ if [[ "${1:-}" == "ast" ]]; then
 fi
 
 # --- Verify binaries exist (Download if missing) ---
-DMODEM_VERSION="v0.1.3"
+DMODEM_VERSION="v0.1.4"
 DMODEM_BASE_URL="https://github.com/gbm-dev/D-Modem/releases/download/${DMODEM_VERSION}"
 
 mkdir -p "${PROJECT_DIR}/bin"
