@@ -25,6 +25,7 @@ RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-in
     ca-certificates \
     psmisc \
     procps \
+    pkg-config \
     libc6:i386 \
     && rm -rf /var/lib/apt/lists/*
 
