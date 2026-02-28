@@ -26,10 +26,14 @@ if dpkg -l asterisk 2>/dev/null | grep -qE '^ii|^rc'; then
     echo "  Done."
 fi
 
-# Clean up any leftover apt modules
+# Clean up any leftover apt or old source modules
 if [[ -d /usr/lib/x86_64-linux-gnu/asterisk ]]; then
     echo "Removing leftover apt Asterisk modules..."
     rm -rf /usr/lib/x86_64-linux-gnu/asterisk
+fi
+if [[ -d /usr/lib/asterisk/modules ]]; then
+    echo "Removing old Asterisk modules from /usr/lib/asterisk/modules..."
+    rm -rf /usr/lib/asterisk/modules
 fi
 
 # --- Install build dependencies ---
