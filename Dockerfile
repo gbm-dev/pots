@@ -15,7 +15,7 @@ RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-in
     && rm -rf /var/lib/apt/lists/*
 
 # Install prebuilt D-Modem binaries from fork release
-ARG DMODEM_VERSION=v0.1.1
+ARG DMODEM_VERSION=v0.1.2
 RUN wget -O /usr/local/bin/slmodemd \
         "https://github.com/gbm-dev/D-Modem/releases/download/${DMODEM_VERSION}/slmodemd" \
     && wget -O /usr/local/bin/d-modem \
