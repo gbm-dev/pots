@@ -164,7 +164,7 @@ for i in $(seq 1 10); do
 done
 
 # --- Kill anything holding port 5060 (stale Asterisk, etc.) ---
-STALE_PID=$(ss -tlnup 'sport = :5060' 2>/dev/null | grep -oP 'pid=\K[0-9]+' | head -1)
+STALE_PID=$(ss -tlnup 'sport = :5060' 2>/dev/null | grep -oP 'pid=\K[0-9]+' | head -1 || true)
 if [[ -n "${STALE_PID:-}" ]]; then
     echo "  Killing stale process on port 5060 (PID ${STALE_PID})..."
     sudo kill "${STALE_PID}" 2>/dev/null || true
