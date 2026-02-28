@@ -67,7 +67,7 @@ if [[ "${1:-}" == "ast" ]]; then
 fi
 
 # --- Verify binaries exist (Download if missing) ---
-DMODEM_VERSION="v0.1.5"
+DMODEM_VERSION="v0.1.6"
 DMODEM_BASE_URL="https://github.com/gbm-dev/D-Modem/releases/download/${DMODEM_VERSION}"
 
 mkdir -p "${PROJECT_DIR}/bin"
@@ -138,15 +138,9 @@ fi
 
 # --- Start D-Modem (slmodemd + d-modem) ---
 echo "Starting D-Modem..."
-# d-modem reads SIP credentials from env vars
-if [[ -z "${TELNYX_SIP_USER:-}" || -z "${TELNYX_SIP_PASS:-}" ]]; then
-    echo "  ERROR: TELNYX_SIP_USER and TELNYX_SIP_PASS must be set for D-Modem"
-    exit 1
-fi
-export SIP_USER="${TELNYX_SIP_USER}"
-export SIP_PASS="${TELNYX_SIP_PASS}"
-export SIP_DOMAIN="${TELNYX_SIP_DOMAIN:-sip.telnyx.com}"
+# d-modem routes calls through local Asterisk (no direct Telnyx credentials needed)
 export SIP_PORT="${SIP_PORT:-5062}"
+export SIP_PROXY="${SIP_PROXY:-127.0.0.1}"
 # Copy binaries to /tmp so they're accessible after slmodemd drops privileges to nobody
 SLMODEMD_RUN="/tmp/slmodemd.$$"
 DMODEM_RUN="/tmp/d-modem.$$"
