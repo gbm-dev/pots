@@ -74,8 +74,47 @@ contrib/scripts/install_prereq install
 echo "Configuring Asterisk..."
 ./configure --prefix=/usr --with-jansson-bundled --with-pjproject-bundled 2>&1 | tail -5
 
-# --- Build ---
-echo "Building Asterisk (this takes a few minutes)..."
+# --- Build (minimal PJSIP only) ---
+echo "Configuring minimal Asterisk build (this takes a few minutes)..."
+make menuselect.makeopts
+
+# Disable everything first
+./menuselect/menuselect --disable-all menuselect.makeopts
+
+# Enable ONLY what we need for PJSIP and modem dialing
+./menuselect/menuselect \
+    --enable res_pjproject \
+    --enable res_pjsip \
+    --enable res_pjsip_authenticator_digest \
+    --enable res_pjsip_outbound_authenticator_digest \
+    --enable res_pjsip_endpoint_identifier_ip \
+    --enable res_pjsip_endpoint_identifier_user \
+    --enable res_pjsip_outbound_registration \
+    --enable res_pjsip_session \
+    --enable res_pjsip_sdp_rtp \
+    --enable res_pjsip_caller_id \
+    --enable res_pjsip_nat \
+    --enable res_pjsip_rfc3326 \
+    --enable res_pjsip_dtmf_info \
+    --enable res_pjsip_logger \
+    --enable res_pjsip_config_wizard \
+    --enable chan_pjsip \
+    --enable res_rtp_asterisk \
+    --enable res_sorcery_config \
+    --enable res_sorcery_memory \
+    --enable res_sorcery_astdb \
+    --enable res_timing_timerfd \
+    --enable codec_ulaw \
+    --enable codec_alaw \
+    --enable pbx_config \
+    --enable app_dial \
+    --enable app_echo \
+    --enable format_pcm \
+    --enable format_wav \
+    --enable bridge_simple \
+    --enable bridge_native_rtp \
+    menuselect.makeopts
+
 make -j"$(nproc)"
 
 # --- Install ---
