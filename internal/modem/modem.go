@@ -126,11 +126,17 @@ func (m *Modem) Dial(phone string, timeout time.Duration) (DialResponse, error) 
 	// Drain before dialing to ensure clean buffer
 	m.drain()
 
-	cmd := fmt.Sprintf("ATDT%s", phone)
+	dialPrefix := strings.TrimSpace(os.Getenv("MODEM_DIAL_PREFIX"))
+	if dialPrefix == "" {
+		// d-modem interprets ATDT as a literal leading "T" in SIP user part.
+		// Use ATD by default so PSTN numbers are sent cleanly.
+		dialPrefix = "ATD"
+	}
+	cmd := fmt.Sprintf("%s%s", dialPrefix, phone)
 	m.logCmd(cmd)
 	if _, err := m.dev.Write([]byte(cmd + "\r")); err != nil {
 		return DialResponse{Result: ResultError, Transcript: m.log.String()},
-			fmt.Errorf("sending ATDT: %w", err)
+			fmt.Errorf("sending dial command: %w", err)
 	}
 
 	resp, err := m.readUntil(timeout, "CONNECT", "BUSY", "NO CARRIER", "NO DIALTONE", "ERROR")

@@ -65,6 +65,7 @@ This image is `dmodem`-only (no Asterisk/IAX runtime path).
 
 For `dmodem`, `SIP_LOGIN` is generated from `TELNYX_SIP_USER`, `TELNYX_SIP_PASS`, and `TELNYX_SIP_DOMAIN`.
 `DMODEM_AT_MS` controls the modulation command sent during modem init (default: `AT+MS=132,0,4800,9600`).
+`MODEM_DIAL_PREFIX` controls the outbound AT dial command prefix (default: `ATD`).
 
 ## Faster Rebuilds
 
