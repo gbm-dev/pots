@@ -1,13 +1,13 @@
 package modem
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // DialResult represents the outcome of a dial attempt.
@@ -49,10 +49,9 @@ type DialResponse struct {
 
 // Modem represents an open modem device.
 type Modem struct {
-	dev    *os.File
-	path   string
-	reader *bufio.Reader
-	log    strings.Builder // accumulates the full AT transcript
+	dev  *os.File
+	path string
+	log  strings.Builder // accumulates the full AT transcript
 }
 
 // Open opens a modem device at the given path.
@@ -62,9 +61,8 @@ func Open(devicePath string) (*Modem, error) {
 		return nil, fmt.Errorf("opening modem device %s: %w", devicePath, err)
 	}
 	m := &Modem{
-		dev:    f,
-		path:   devicePath,
-		reader: bufio.NewReader(f),
+		dev:  f,
+		path: devicePath,
 	}
 	log.Printf("[modem] opened %s", devicePath)
 	return m, nil
@@ -75,23 +73,23 @@ func (m *Modem) Init(timeout time.Duration) error {
 	// Drain any stale data in the buffer
 	m.drain()
 
-	// Disable echo first — reduces noise in subsequent responses
-	resp, err := m.runAT("ATE0", timeout, "OK", "ERROR")
-	if err != nil {
-		return fmt.Errorf("ATE0: no response (%w)", err)
-	}
-	if strings.Contains(resp, "ERROR") {
-		return fmt.Errorf("ATE0 returned ERROR: %s", cleanResponse(resp))
-	}
-	m.drain()
-
-	// Reset modem
-	resp, err = m.runAT("ATZ", timeout, "OK", "ERROR")
+	// Reset modem first. ATZ can restore default settings.
+	resp, err := m.runAT("ATZ", timeout, "OK", "ERROR")
 	if err != nil {
 		return fmt.Errorf("ATZ: no response (%w)", err)
 	}
 	if strings.Contains(resp, "ERROR") {
 		return fmt.Errorf("ATZ returned ERROR: %s", cleanResponse(resp))
+	}
+	m.drain()
+
+	// Disable echo after reset so it stays off for dial commands.
+	resp, err = m.runAT("ATE0", timeout, "OK", "ERROR")
+	if err != nil {
+		return fmt.Errorf("ATE0: no response (%w)", err)
+	}
+	if strings.Contains(resp, "ERROR") {
+		return fmt.Errorf("ATE0 returned ERROR: %s", cleanResponse(resp))
 	}
 
 	// Drain again after reset to clear any echo/noise
@@ -184,8 +182,6 @@ func (m *Modem) drain() {
 		}
 	}
 	m.dev.SetReadDeadline(time.Time{})
-	// Reset the bufio reader since we read directly from dev
-	m.reader.Reset(m.dev)
 }
 
 func (m *Modem) logCmd(cmd string) {
@@ -217,16 +213,33 @@ func (m *Modem) runAT(cmd string, timeout time.Duration, matches ...string) (str
 func (m *Modem) readUntil(timeout time.Duration, matches ...string) (string, error) {
 	deadline := time.Now().Add(timeout)
 	var accumulated strings.Builder
+	buf := make([]byte, 1024)
+
+	upperMatches := make([]string, len(matches))
+	for i, match := range matches {
+		upperMatches[i] = strings.ToUpper(match)
+	}
 
 	for time.Now().Before(deadline) {
-		m.dev.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-		line, err := m.reader.ReadString('\n')
-		accumulated.WriteString(line)
+		remaining := time.Until(deadline)
+		readStep := 500 * time.Millisecond
+		if remaining < readStep {
+			readStep = remaining
+		}
+		if readStep <= 0 {
+			break
+		}
+		m.dev.SetReadDeadline(time.Now().Add(readStep))
+		n, err := m.dev.Read(buf)
+		if n > 0 {
+			accumulated.Write(buf[:n])
+			upperResp := strings.ToUpper(accumulated.String())
 
-		for _, match := range matches {
-			if strings.Contains(accumulated.String(), match) {
-				m.dev.SetReadDeadline(time.Time{})
-				return accumulated.String(), nil
+			for _, match := range upperMatches {
+				if strings.Contains(upperResp, match) {
+					m.dev.SetReadDeadline(time.Time{})
+					return accumulated.String(), nil
+				}
 			}
 		}
 
@@ -240,8 +253,14 @@ func (m *Modem) readUntil(timeout time.Duration, matches ...string) (string, err
 
 // cleanResponse strips control chars and excess whitespace from modem output.
 func cleanResponse(s string) string {
-	s = strings.ReplaceAll(s, "\r\n", " ")
-	s = strings.ReplaceAll(s, "\r", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	return strings.TrimSpace(s)
+	s = strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' || r == '\t' {
+			return ' '
+		}
+		if !unicode.IsPrint(r) {
+			return ' '
+		}
+		return r
+	}, s)
+	return strings.Join(strings.Fields(s), " ")
 }
