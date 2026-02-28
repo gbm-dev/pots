@@ -1,5 +1,5 @@
 # Stage 1: Build Go binaries
-FROM golang:1.23-alpine AS go-builder
+FROM golang:1.25-alpine AS go-builder
 WORKDIR /app
 COPY . .
 RUN go build -o /usr/local/bin/oob-hub ./cmd/oob-hub/main.go \
