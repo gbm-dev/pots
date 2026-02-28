@@ -182,6 +182,21 @@ fi
 # --- Enable SIP debug logging ---
 ast_cli "pjsip set logger on" 2>/dev/null || true
 
+# --- Wait for Telnyx registration ---
+echo ""
+echo "Waiting for Telnyx SIP registration..."
+for i in $(seq 1 15); do
+    REG_STATUS=$(ast_cli "pjsip show registrations" 2>/dev/null || true)
+    if echo "$REG_STATUS" | grep -q "Registered"; then
+        echo "  Telnyx registered."
+        break
+    fi
+    if [ "$i" -eq 15 ]; then
+        echo "  WARNING: Telnyx not registered after 15s (will keep trying in background)"
+    fi
+    sleep 1
+done
+
 # --- Dump initial diagnostics ---
 echo ""
 echo "=== Asterisk Diagnostics ==="
