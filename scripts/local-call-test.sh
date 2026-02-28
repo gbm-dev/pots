@@ -20,6 +20,7 @@ REGISTER_TIMEOUT_SEC="${REGISTER_TIMEOUT_SEC:-45}"
 
 LOG_DIR="${LOG_DIR:-${PROJECT_DIR}/logs}"
 RESULTS_DIR="${LOG_DIR}/probe-runs"
+AST_RUNTIME_CONF_FILE="${LOG_DIR}/.local-dev-asterisk.conf"
 TS="$(date +%Y%m%d-%H%M%S)"
 RESULT_FILE="${RESULTS_DIR}/fixed-call-${TS}.log"
 STACK_LOG="${RESULTS_DIR}/local-dev-${TS}.log"
@@ -34,7 +35,15 @@ run_ast() {
 }
 
 stack_ready() {
-    run_ast "core show version" >/dev/null 2>&1
+    local conf_path
+    if [[ ! -f "${AST_RUNTIME_CONF_FILE}" ]]; then
+        return 1
+    fi
+    conf_path="$(<"${AST_RUNTIME_CONF_FILE}")"
+    if [[ -z "${conf_path}" || ! -f "${conf_path}" ]]; then
+        return 1
+    fi
+    run_ast "pjsip show endpoint dmodem" | grep -q "Endpoint:  dmodem"
 }
 
 is_registered() {
