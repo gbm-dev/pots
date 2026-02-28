@@ -43,7 +43,7 @@ func New(cfg config.AppConfig, store auth.UserStore, lock *modem.DeviceLock, sit
 	hostKeyPath := filepath.Join(cfg.HostKeyDir, "ssh_host_ed25519_key")
 
 	srv, err := wish.NewServer(
-		wish.WithAddress(fmt.Sprintf(":%d", cfg.SSHPort)),
+		wish.WithAddress(fmt.Sprintf("%s:%d", cfg.SSHAddress, cfg.SSHPort)),
 		wish.WithHostKeyPath(hostKeyPath),
 		wish.WithPasswordAuth(s.passwordAuth),
 		wish.WithMiddleware(

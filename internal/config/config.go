@@ -7,6 +7,7 @@ import (
 
 // AppConfig holds application configuration loaded from environment variables.
 type AppConfig struct {
+	SSHAddress  string
 	SSHPort     int
 	DevicePath  string
 	SitesPath   string
@@ -18,6 +19,7 @@ type AppConfig struct {
 // LoadFromEnv loads configuration from environment variables with defaults.
 func LoadFromEnv() AppConfig {
 	return AppConfig{
+		SSHAddress:  envStr("SSH_ADDRESS", ""),
 		SSHPort:     envInt("SSH_PORT", 2222),
 		DevicePath:  envStr("DEVICE_PATH", "/dev/ttySL0"),
 		SitesPath:   envStr("SITES_PATH", "/etc/oob-sites.conf"),

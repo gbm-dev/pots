@@ -85,7 +85,7 @@ fi
 
 # --- Start Go SSH server (replaces sshd) ---
 echo "=== OOB Console Hub Ready ==="
-echo "SSH server listening on :${SSH_PORT:-2222}"
+echo "SSH server listening on ${SSH_ADDRESS:-}:${SSH_PORT:-2222}"
 echo "Modem device: ${DEVICE_PATH}"
 echo "Manage users with: docker exec oob-console-hub oob-manage <command>"
 

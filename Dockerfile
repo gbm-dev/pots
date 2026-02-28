@@ -15,7 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     wget \
-    libncurses-dev \
+    libncurses5-dev \
     libssl-dev \
     libxml2-dev \
     libsqlite3-dev \
@@ -25,7 +25,6 @@ RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-in
     ca-certificates \
     psmisc \
     procps \
-    pkg-config \
     libc6:i386 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -115,22 +114,10 @@ RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/oob-healthcheck.sh
 WORKDIR /app
 
 # Expose ports
-# 2222 - SSH (Go TUI)
+# 22 - SSH (Go TUI)
 # 5060 - SIP (UDP)
 # 10000-10100 - RTP media
-EXPOSE 2222/tcp 5060/udp 10000-10100/udp
-
-# Docker-level health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD /usr/local/bin/oob-healthcheck.sh || exit 1
-
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-
-# Expose ports
-# 2222 - SSH (Go TUI)
-# 5060 - SIP (UDP)
-# 10000-10100 - RTP media
-EXPOSE 2222/tcp 5060/udp 10000-10100/udp
+EXPOSE 22/tcp 5060/udp 10000-10100/udp
 
 # Docker-level health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
