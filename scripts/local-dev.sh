@@ -93,6 +93,7 @@ cleanup() {
         fi
     done
     rm -f "${AST_RUNTIME_CONF_FILE}"
+    rm -f "${SLMODEMD_RUN:-}" "${DMODEM_RUN:-}"
     if [[ -n "${ASTERISK_TMP:-}" && -d "${ASTERISK_TMP}" ]]; then
         rm -rf "${ASTERISK_TMP}"
     fi
@@ -145,8 +146,14 @@ fi
 export SIP_USER="${TELNYX_SIP_USER}"
 export SIP_PASS="${TELNYX_SIP_PASS}"
 export SIP_DOMAIN="${TELNYX_SIP_DOMAIN:-sip.telnyx.com}"
+# Copy binaries to /tmp so they're accessible after slmodemd drops privileges to nobody
+SLMODEMD_RUN="/tmp/slmodemd.$$"
+DMODEM_RUN="/tmp/d-modem.$$"
+cp "$SLMODEMD_BIN" "$SLMODEMD_RUN"
+cp "$DMODEM_BIN" "$DMODEM_RUN"
+chmod 755 "$SLMODEMD_RUN" "$DMODEM_RUN"
 # Limit file descriptors to 1024 to avoid FD_SETSIZE crash in 32-bit slmodemd
-sudo -E sh -c "ulimit -n 1024; \"$SLMODEMD_BIN\" -d9 -e \"$DMODEM_BIN\"" &
+sudo -E sh -c "ulimit -n 1024; \"$SLMODEMD_RUN\" -d9 -e \"$DMODEM_RUN\"" &
 PIDS+=($!)
 echo "  slmodemd PID: ${PIDS[-1]}"
 
