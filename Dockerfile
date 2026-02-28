@@ -15,7 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     wget \
-    libncurses-dev \
+    libncurses5-dev \
     libssl-dev \
     libxml2-dev \
     libsqlite3-dev \
@@ -25,29 +25,21 @@ RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-in
     ca-certificates \
     psmisc \
     procps \
-    pkg-config \
     libc6:i386 \
     && rm -rf /var/lib/apt/lists/*
 
-# Download Asterisk 22 LTS
+# Build and Install Asterisk 22 LTS (Minimal PJSIP only)
+# This matches our verified scripts/install-asterisk.sh process.
 WORKDIR /usr/local/src
 RUN wget -q "http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-22-current.tar.gz" \
     && tar xzf asterisk-22-current.tar.gz \
-    && rm asterisk-22-current.tar.gz
-
-# Install Asterisk prerequisites (non-fatal if aptitude is missing)
-RUN cd asterisk-22.*/ && \
-    DEBIAN_FRONTEND=noninteractive ./contrib/scripts/install_prereq install -y || true
-
-# Configure Asterisk (install to /usr)
-RUN cd asterisk-22.*/ && \
-    ./configure --prefix=/usr --with-jansson-bundled --with-pjproject-bundled 2>&1 | tail -5
-
-# Build Asterisk (Minimal PJSIP only)
-RUN cd asterisk-22.*/ && \
-    make menuselect.makeopts && \
-    ./menuselect/menuselect --disable-all menuselect.makeopts && \
-    ./menuselect/menuselect \
+    && rm asterisk-22-current.tar.gz \
+    && cd asterisk-22.*/ \
+    && (yes | DEBIAN_FRONTEND=noninteractive ./contrib/scripts/install_prereq install || true) \
+    && ./configure --prefix=/usr --with-jansson-bundled --with-pjproject-bundled 2>&1 | tail -5 \
+    && make menuselect.makeopts \
+    && ./menuselect/menuselect --disable-all menuselect.makeopts \
+    && ./menuselect/menuselect \
         --enable res_pjproject \
         --enable res_pjsip \
         --enable res_pjsip_authenticator_digest \
@@ -87,13 +79,10 @@ RUN cd asterisk-22.*/ && \
         --enable bridge_native_rtp \
         --enable func_callerid \
         --enable func_logic \
-        menuselect.makeopts
-
-# Compile and Install Asterisk
-RUN cd asterisk-22.*/ && \
-    make -j$(nproc) && \
-    make install && \
-    rm -rf /usr/local/src/asterisk-22.*/
+        menuselect.makeopts \
+    && make -j$(nproc) \
+    && make install \
+    && cd .. && rm -rf asterisk-22.*/
 
 # Install prebuilt slmodemd/d-modem binaries
 ARG DMODEM_VERSION=v0.1.6
