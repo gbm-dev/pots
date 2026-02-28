@@ -22,6 +22,10 @@ services:
       - oob-userdata:/data/users
     cap_add:
       - SYS_ADMIN
+    ulimits:
+      nofile:
+        soft: ${NOFILE_LIMIT:-512}
+        hard: ${NOFILE_LIMIT:-512}
 
 volumes:
   oob-userdata:
