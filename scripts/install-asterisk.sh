@@ -100,8 +100,6 @@ make menuselect.makeopts
 ./menuselect/menuselect \
     --enable res_pjproject \
     --enable res_pjsip \
-    --enable res_geolocation \
-    --enable res_statsd \
     --enable res_pjsip_authenticator_digest \
     --enable res_pjsip_outbound_authenticator_digest \
     --enable res_pjsip_endpoint_identifier_ip \
@@ -115,6 +113,10 @@ make menuselect.makeopts
     --enable res_pjsip_dtmf_info \
     --enable res_pjsip_logger \
     --enable res_pjsip_config_wizard \
+    --enable res_pjsip_pubsub \
+    --enable res_pjsip_outbound_publish \
+    --enable res_geolocation \
+    --enable res_statsd \
     --enable chan_pjsip \
     --enable res_rtp_asterisk \
     --enable res_sorcery_config \
@@ -123,13 +125,18 @@ make menuselect.makeopts
     --enable res_timing_timerfd \
     --enable codec_ulaw \
     --enable codec_alaw \
+    --enable codec_gsm \
     --enable pbx_config \
     --enable app_dial \
     --enable app_echo \
+    --enable app_playback \
     --enable format_pcm \
     --enable format_wav \
+    --enable format_gsm \
     --enable bridge_simple \
     --enable bridge_native_rtp \
+    --enable func_callerid \
+    --enable func_logic \
     menuselect.makeopts
 
 make -j"$(nproc)"
@@ -143,8 +150,13 @@ echo ""
 echo "=== Installed ==="
 asterisk -V
 echo ""
-echo "Module directory:"
-ls /usr/lib/asterisk/modules/chan_pjsip.so 2>/dev/null && echo "  chan_pjsip.so: OK" || echo "  chan_pjsip.so: MISSING"
-ls /usr/lib/asterisk/modules/res_pjsip.so 2>/dev/null && echo "  res_pjsip.so: OK" || echo "  res_pjsip.so: MISSING"
+echo "Verifying critical modules in /usr/lib/asterisk/modules/:"
+for mod in chan_pjsip res_pjsip res_pjsip_session res_geolocation res_statsd res_pjproject; do
+    if [[ -f "/usr/lib/asterisk/modules/${mod}.so" ]]; then
+        echo "  ${mod}.so: OK"
+    else
+        echo "  ${mod}.so: MISSING"
+    fi
+done
 echo ""
 echo "To start: ./scripts/local-dev.sh"
