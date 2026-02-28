@@ -20,6 +20,7 @@ type DialingModel struct {
 	status     string
 	device     string
 	transcript string
+	showDebug  bool
 	err        error
 	done       bool
 	pool       *modem.Pool
@@ -71,6 +72,12 @@ func (m DialingModel) Update(msg tea.Msg) (DialingModel, tea.Cmd) {
 		m.done = true
 		m.err = msg.Err
 		return m, nil
+
+	case tea.KeyMsg:
+		if m.done && (msg.String() == "d" || msg.String() == "D") {
+			m.showDebug = !m.showDebug
+			return m, nil
+		}
 	}
 
 	return m, nil
@@ -86,11 +93,18 @@ func (m DialingModel) View() string {
 	if m.err != nil {
 		view := header + "\n\n" + details + "\n\n" +
 			m.theme.ErrorStyle.Render(fmt.Sprintf("  Error: %s", m.err))
-		if m.transcript != "" {
+		if m.transcript != "" && m.showDebug {
 			view += "\n\n" + m.theme.LabelStyle.Render("  AT log:") + "\n" +
 				m.theme.NewStyle().Foreground(m.theme.ColorMuted).PaddingLeft(4).Render(m.transcript)
 		}
-		view += "\n\n" + m.theme.LabelStyle.Render("  Press Enter to return to menu")
+		if m.transcript != "" {
+			if m.showDebug {
+				view += "\n\n" + m.theme.LabelStyle.Render("  Press D to hide debug log")
+			} else {
+				view += "\n\n" + m.theme.LabelStyle.Render("  Press D to show debug log")
+			}
+		}
+		view += "\n" + m.theme.LabelStyle.Render("  Press Enter to return to menu")
 		return m.theme.BoxStyle.Render(view)
 	}
 
