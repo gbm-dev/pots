@@ -191,7 +191,14 @@ if ! kill -0 "${PIDS[-1]}" 2>/dev/null; then
 fi
 
 # --- Enable SIP debug logging ---
-ast_cli "pjsip set logger on" 2>/dev/null || true
+echo "Enabling PJSIP logger..."
+for i in $(seq 1 5); do
+    if ast_cli "pjsip set logger on" &>/dev/null; then
+        echo "  PJSIP logger enabled."
+        break
+    fi
+    sleep 1
+done
 
 # --- Wait for Telnyx registration (required for outbound calls) ---
 echo ""

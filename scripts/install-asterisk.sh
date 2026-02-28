@@ -100,6 +100,8 @@ make menuselect.makeopts
 ./menuselect/menuselect \
     --enable res_pjproject \
     --enable res_pjsip \
+    --enable res_geolocation \
+    --enable res_statsd \
     --enable res_pjsip_authenticator_digest \
     --enable res_pjsip_outbound_authenticator_digest \
     --enable res_pjsip_endpoint_identifier_ip \
