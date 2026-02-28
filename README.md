@@ -78,6 +78,7 @@ docker compose build
 ```
 
 The binaries are written to `third_party/dmodem/`.
+The bundled build defaults to PJSIP epoll mode (`--enable-epoll`) for better stability.
 
 For normal restarts/deploys after that, no rebuild is needed:
 
