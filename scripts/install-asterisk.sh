@@ -68,12 +68,22 @@ cd "${AST_SRC}"
 
 # --- Install Asterisk prerequisites ---
 echo "Installing Asterisk prerequisites..."
-# Use non-interactive mode to prevent script from hanging or exiting
-DEBIAN_FRONTEND=noninteractive contrib/scripts/install_prereq install -y
+if [[ -f "contrib/scripts/install_prereq" ]]; then
+    # Use yes to answer any prompts and || true to prevent exit if it returns non-zero
+    # but still mostly worked.
+    yes | DEBIAN_FRONTEND=noninteractive contrib/scripts/install_prereq install || {
+        echo "WARNING: install_prereq returned an error, attempting to continue..."
+    }
+else
+    echo "WARNING: contrib/scripts/install_prereq not found!"
+fi
 
 # --- Clean and Configure ---
 echo "Cleaning old build state..."
-make distclean || true
+# Only run distclean if a Makefile exists
+if [[ -f Makefile ]]; then
+    make distclean || true
+fi
 
 # --- Configure (install to /usr so it replaces the apt paths) ---
 echo "Configuring Asterisk..."
