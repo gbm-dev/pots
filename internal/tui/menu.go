@@ -73,7 +73,7 @@ type MenuModel struct {
 	username   string
 	freePorts  int
 	totalPorts int
-	sipStatus  SIPStatus
+	sipInfo SIPInfo
 }
 
 // NewMenuModel creates the site selection menu.
@@ -128,7 +128,7 @@ func (m MenuModel) Update(msg tea.Msg) (MenuModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.list.SetSize(msg.Width, msg.Height-4)
 	case sipStatusMsg:
-		m.sipStatus = SIPStatus(msg)
+		m.sipInfo = SIPInfo(msg)
 		return m, nil
 	case sipTickMsg:
 		return m, tea.Batch(
@@ -146,12 +146,20 @@ func (m MenuModel) View() string {
 	// Status bar
 	var parts []string
 
-	// SIP status with color
-	switch m.sipStatus {
+	// SIP status with color and trunk detail
+	switch m.sipInfo.Status {
 	case SIPRegistered:
-		parts = append(parts, successStyle.Render("● SIP registered"))
+		sipText := "● " + m.sipInfo.Trunk
+		if m.sipInfo.Server != "" {
+			sipText += " → " + m.sipInfo.Server
+		}
+		parts = append(parts, successStyle.Render(sipText))
 	case SIPUnregistered:
-		parts = append(parts, errorStyle.Render("● SIP unregistered"))
+		sipText := "● SIP not registered"
+		if m.sipInfo.Trunk != "" {
+			sipText = "● " + m.sipInfo.Trunk + " not registered"
+		}
+		parts = append(parts, errorStyle.Render(sipText))
 	default:
 		parts = append(parts, labelStyle.Render("○ SIP checking..."))
 	}

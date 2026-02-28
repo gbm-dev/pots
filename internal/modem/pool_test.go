@@ -1,14 +1,34 @@
 package modem
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
+func testPool(t *testing.T, count int) (*Pool, []string) {
+	t.Helper()
+	dir := t.TempDir()
+	devices := make(map[string]string)
+	var paths []string
+	for i := 0; i < count; i++ {
+		path := filepath.Join(dir, "ttyIAX")
+		// Each needs a unique name
+		path = filepath.Join(dir, fmt.Sprintf("ttyIAX%d", i))
+		f, err := os.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+		devices[path] = ""
+		paths = append(paths, path)
+	}
+	return &Pool{devices: devices}, paths
+}
+
 func TestPoolAcquireRelease(t *testing.T) {
-	p := &Pool{devices: map[string]string{
-		"/dev/ttyIAX0": "",
-		"/dev/ttyIAX1": "",
-	}}
+	p, _ := testPool(t, 2)
 
 	dev1, err := p.Acquire("site-a")
 	if err != nil {
@@ -43,12 +63,37 @@ func TestPoolAcquireRelease(t *testing.T) {
 	}
 }
 
-func TestPoolAvailable(t *testing.T) {
+func TestPoolAcquireRemovesMissing(t *testing.T) {
+	dir := t.TempDir()
+	missingPath := filepath.Join(dir, "ttyGONE")
+	realPath := filepath.Join(dir, "ttyREAL")
+	os.Create(realPath)
+
 	p := &Pool{devices: map[string]string{
-		"/dev/ttyIAX0": "",
-		"/dev/ttyIAX1": "",
-		"/dev/ttyIAX2": "some-site",
+		missingPath: "",
+		realPath:    "",
 	}}
+
+	dev, err := p.Acquire("test")
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	if dev != realPath {
+		t.Errorf("expected %q, got %q", realPath, dev)
+	}
+
+	// Missing device should have been pruned during Acquire
+	// Try to acquire again — only the one we got should be in pool (and it's in use)
+	_, err = p.Acquire("test2")
+	if err == nil {
+		t.Error("expected error — missing device should be pruned and real one is in use")
+	}
+}
+
+func TestPoolAvailable(t *testing.T) {
+	p, paths := testPool(t, 3)
+	// Mark one as in-use
+	p.devices[paths[2]] = "some-site"
 
 	free, total := p.Available()
 	if total != 3 {
@@ -60,11 +105,9 @@ func TestPoolAvailable(t *testing.T) {
 }
 
 func TestPoolActiveSites(t *testing.T) {
-	p := &Pool{devices: map[string]string{
-		"/dev/ttyIAX0": "site-a",
-		"/dev/ttyIAX1": "",
-		"/dev/ttyIAX2": "site-b",
-	}}
+	p, paths := testPool(t, 3)
+	p.devices[paths[0]] = "site-a"
+	p.devices[paths[2]] = "site-b"
 
 	active := p.ActiveSites()
 	if len(active) != 2 {

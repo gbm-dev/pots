@@ -25,13 +25,19 @@ func NewPool(modemCount int) *Pool {
 	return &Pool{devices: devices}
 }
 
-// Acquire returns the first available device, or an error if none are free.
+// Acquire returns the first available device that exists on the filesystem,
+// or an error if none are free.
 func (p *Pool) Acquire(siteName string) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	for dev, site := range p.devices {
 		if site == "" {
+			// Verify device still exists before handing it out
+			if _, err := os.Stat(dev); err != nil {
+				delete(p.devices, dev)
+				continue
+			}
 			p.devices[dev] = siteName
 			return dev, nil
 		}
