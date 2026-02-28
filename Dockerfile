@@ -1,3 +1,23 @@
+FROM ubuntu:24.04 AS dmodem-builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc-multilib \
+    libc6-dev-i386 \
+    git \
+    pkg-config \
+    libssl-dev \
+    ca-certificates \
+    make \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone https://git.jerryxiao.cc/Jerry/D-Modem /tmp/dmodem \
+    && cd /tmp/dmodem \
+    && git submodule update --init --recursive \
+    && make NO_PULSE=1
+
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -12,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     wget \
     libtiff6 \
+    libc6-i386 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install prebuilt iaxmodem binary from GitHub release
@@ -19,8 +40,12 @@ RUN wget -O /usr/local/bin/iaxmodem \
         "https://github.com/gbm-dev/pots/releases/download/v0.1.0/iaxmodem" \
     && chmod +x /usr/local/bin/iaxmodem
 
+# Install D-Modem binaries built in the previous stage.
+COPY --from=dmodem-builder /tmp/dmodem/slmodemd/slmodemd /usr/local/bin/slmodemd
+COPY --from=dmodem-builder /tmp/dmodem/d-modem.nopulse /usr/local/bin/d-modem.nopulse
+
 # Create directories
-RUN mkdir -p /var/log/oob-sessions /etc/iaxmodem /var/log/iaxmodem
+RUN mkdir -p /var/log/oob-sessions /etc/iaxmodem /var/log/iaxmodem /var/log/dmodem
 
 # Copy Asterisk configuration
 COPY config/asterisk/pjsip.conf /etc/asterisk/pjsip.conf
@@ -38,10 +63,12 @@ COPY config/oob-sites.conf /etc/oob-sites.conf
 # Copy scripts (only startup/infra scripts)
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY scripts/setup-iaxmodem.sh /usr/local/bin/setup-iaxmodem.sh
+COPY scripts/start-dmodem.sh /usr/local/bin/start-dmodem.sh
 COPY scripts/oob-healthcheck.sh /usr/local/bin/oob-healthcheck.sh
 
 RUN chmod +x /usr/local/bin/entrypoint.sh \
              /usr/local/bin/setup-iaxmodem.sh \
+             /usr/local/bin/start-dmodem.sh \
              /usr/local/bin/oob-healthcheck.sh
 
 # Install Go binaries from GitHub release — this layer MUST be after COPY

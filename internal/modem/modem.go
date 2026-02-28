@@ -92,8 +92,34 @@ func (m *Modem) Init(timeout time.Duration) error {
 		return fmt.Errorf("ATE0 returned ERROR: %s", cleanResponse(resp))
 	}
 
+	// d-modem needs explicit no-dialtone mode and stable modulation limits.
+	if os.Getenv("MODEM_BACKEND") == "dmodem" {
+		if err := m.runInitCmd("ATX3", timeout); err != nil {
+			return err
+		}
+
+		modulation := os.Getenv("DMODEM_AT_MS")
+		if strings.TrimSpace(modulation) == "" {
+			modulation = "AT+MS=132,0,4800,9600"
+		}
+		if err := m.runInitCmd(modulation, timeout); err != nil {
+			return err
+		}
+	}
+
 	// Drain again after reset to clear any echo/noise
 	m.drain()
+	return nil
+}
+
+func (m *Modem) runInitCmd(cmd string, timeout time.Duration) error {
+	resp, err := m.runAT(cmd, timeout, "OK", "ERROR")
+	if err != nil {
+		return fmt.Errorf("%s: no response (%w)", cmd, err)
+	}
+	if strings.Contains(resp, "ERROR") {
+		return fmt.Errorf("%s returned ERROR: %s", cmd, cleanResponse(resp))
+	}
 	return nil
 }
 

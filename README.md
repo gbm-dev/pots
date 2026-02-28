@@ -1,6 +1,6 @@
 # POTS - OOB Console Hub
 
-Dockerized out-of-band console access over PSTN. Admins SSH in, pick a site from a modern TUI menu, and get dropped into a live modem session routed through Asterisk + Telnyx SIP.
+Dockerized out-of-band console access over PSTN. Admins SSH in, pick a site from a modern TUI menu, and get dropped into a live modem session routed through D-Modem/Telnyx SIP (default) or IAXmodem/Asterisk (fallback).
 
 Built with Go using the [Charm](https://charm.sh) ecosystem (Wish + Bubble Tea + Lip Gloss) for a single-binary SSH server with native modem handling and built-in user management.
 
@@ -66,6 +66,18 @@ router1|13125559876|Chicago Core Router|9600
 
 The phone number is the PSTN line connected to the modem/console server at the remote site.
 
+## Modem Backend
+
+The default backend is `dmodem` (software modem over SIP). You can switch back to `iaxmodem` if needed:
+
+```bash
+MODEM_BACKEND=dmodem   # default
+# MODEM_BACKEND=iaxmodem
+```
+
+For `dmodem`, `SIP_LOGIN` is generated from `TELNYX_SIP_USER`, `TELNYX_SIP_PASS`, and `TELNYX_SIP_DOMAIN`.
+`DMODEM_AT_MS` controls the modulation command sent during modem init (default: `AT+MS=132,0,4800,9600`).
+
 ## User Management
 
 Run from the host (wrapper delegates to container):
@@ -110,13 +122,14 @@ The watchdog checks health every 2 minutes and auto-restarts on critical failure
 ## Architecture
 
 ```
-Admin SSH (:2222) → Wish/Bubble Tea TUI → free ttyIAX → Asterisk → Telnyx SIP → PSTN → Remote Device
+Admin SSH (:2222) → Wish/Bubble Tea TUI → free tty device → modem backend (dmodem or iaxmodem) → Telnyx SIP/PSTN → Remote Device
 ```
 
 - **oob-hub**: Go binary — Wish SSH server + Bubble Tea TUI + modem pool + user store
 - **oob-manage**: Go binary — CLI for user management (add/remove/list/lock/unlock/reset)
-- **Asterisk**: PJSIP trunk to Telnyx (credential auth, ulaw, jitterbuffer)
-- **IAXmodem**: 8 virtual modem instances (`/dev/ttyIAX0-7`)
+- **D-Modem**: Default software modem backend (`slmodemd` + `d-modem`) exposing `/dev/ttyIAX0-7` symlinks.
+- **IAXmodem**: Fallback backend for legacy deployments.
+- **Asterisk**: Used by the `iaxmodem` backend and retained for compatibility/ops tooling.
 - **User store**: `users.json` with bcrypt hashing, atomic writes, file locking
 - **systemd**: `oob-hub.service` + `oob-watchdog.timer`
 

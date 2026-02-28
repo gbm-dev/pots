@@ -3,21 +3,26 @@ package modem
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 )
 
-// Pool manages a set of IAXmodem PTY devices.
+// Pool manages a set of modem PTY devices.
 type Pool struct {
 	mu      sync.Mutex
 	devices map[string]string // device path → site name ("" = free)
 }
 
-// NewPool creates a pool with modemCount devices (/dev/ttyIAX0 through ttyIAX{n-1}).
+// NewPool creates a pool with modemCount devices (devicePrefix + index).
 // Only devices that exist on the filesystem are added to the pool.
-func NewPool(modemCount int) *Pool {
+func NewPool(modemCount int, devicePrefix string) *Pool {
+	if strings.TrimSpace(devicePrefix) == "" {
+		devicePrefix = "/dev/ttyIAX"
+	}
+
 	devices := make(map[string]string)
 	for i := 0; i < modemCount; i++ {
-		dev := fmt.Sprintf("/dev/ttyIAX%d", i)
+		dev := fmt.Sprintf("%s%d", devicePrefix, i)
 		if _, err := os.Stat(dev); err == nil {
 			devices[dev] = ""
 		}

@@ -16,7 +16,7 @@ escape_sed_replacement() {
 
 if [[ -z "${TELNYX_SIP_USER:-}" || -z "${TELNYX_SIP_PASS:-}" ]]; then
     echo "WARNING: TELNYX_SIP_USER or TELNYX_SIP_PASS not set!"
-    echo "Asterisk will start but Telnyx trunk will not register."
+    echo "SIP authentication will fail for outbound modem calls."
 fi
 
 TELNYX_SIP_USER_ESCAPED=$(escape_sed_replacement "${TELNYX_SIP_USER:-unset}")
@@ -42,28 +42,47 @@ echo "Telnyx telephony config populated."
 mkdir -p /var/log/oob-sessions
 chmod 1777 /var/log/oob-sessions
 
-# --- Generate IAXmodem configs ---
-/usr/local/bin/setup-iaxmodem.sh
-
-# --- Start IAXmodem instances ---
 MODEM_COUNT=${MODEM_COUNT:-8}
-echo "Starting ${MODEM_COUNT} IAXmodem instances..."
+MODEM_BACKEND=${MODEM_BACKEND:-dmodem}
+MODEM_DEVICE_PREFIX=${MODEM_DEVICE_PREFIX:-/dev/ttyIAX}
 
-for i in $(seq 0 $((MODEM_COUNT - 1))); do
-    iaxmodem "ttyIAX${i}" &
-    echo "  Started IAXmodem ttyIAX${i} (PID $!)"
-done
+case "${MODEM_BACKEND}" in
+    iaxmodem)
+        # --- Generate IAXmodem configs ---
+        /usr/local/bin/setup-iaxmodem.sh
 
-# Give IAXmodem a moment to create PTYs
-sleep 2
+        # --- Start IAXmodem instances ---
+        echo "Starting ${MODEM_COUNT} IAXmodem instances..."
+        for i in $(seq 0 $((MODEM_COUNT - 1))); do
+            iaxmodem "ttyIAX${i}" &
+            echo "  Started IAXmodem ttyIAX${i} (PID $!)"
+        done
+        sleep 2
+        ;;
+    dmodem)
+        # D-Modem uses SIP directly; provide SIP_LOGIN expected by d-modem.
+        if [[ -n "${TELNYX_SIP_USER:-}" && -n "${TELNYX_SIP_PASS:-}" ]]; then
+            export SIP_LOGIN="${TELNYX_SIP_USER}:${TELNYX_SIP_PASS}@${TELNYX_SIP_DOMAIN:-sip.telnyx.com}"
+        else
+            echo "WARNING: TELNYX_SIP_USER/TELNYX_SIP_PASS missing; dmodem calls will fail."
+        fi
+
+        /usr/local/bin/start-dmodem.sh
+        ;;
+    *)
+        echo "ERROR: Unsupported MODEM_BACKEND='${MODEM_BACKEND}' (expected 'dmodem' or 'iaxmodem')."
+        exit 1
+        ;;
+esac
 
 # Verify modem devices
 echo "Modem devices:"
 for i in $(seq 0 $((MODEM_COUNT - 1))); do
-    if [[ -e "/dev/ttyIAX${i}" ]]; then
-        echo "  /dev/ttyIAX${i} - OK"
+    dev="${MODEM_DEVICE_PREFIX}${i}"
+    if [[ -e "${dev}" ]]; then
+        echo "  ${dev} - OK"
     else
-        echo "  /dev/ttyIAX${i} - MISSING (IAXmodem may have failed)"
+        echo "  ${dev} - MISSING (${MODEM_BACKEND} may have failed)"
     fi
 done
 

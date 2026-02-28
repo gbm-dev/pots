@@ -95,15 +95,22 @@ func TestLoadFromEnv(t *testing.T) {
 	if cfg.ModemCount != 8 {
 		t.Errorf("default ModemCount = %d, want 8", cfg.ModemCount)
 	}
+	if cfg.ModemDevicePrefix != "/dev/ttyIAX" {
+		t.Errorf("default ModemDevicePrefix = %q, want /dev/ttyIAX", cfg.ModemDevicePrefix)
+	}
 
 	// Test override
 	t.Setenv("SSH_PORT", "3333")
 	t.Setenv("MODEM_COUNT", "4")
+	t.Setenv("MODEM_DEVICE_PREFIX", "/tmp/ttySL")
 	cfg = LoadFromEnv()
 	if cfg.SSHPort != 3333 {
 		t.Errorf("SSHPort = %d, want 3333", cfg.SSHPort)
 	}
 	if cfg.ModemCount != 4 {
 		t.Errorf("ModemCount = %d, want 4", cfg.ModemCount)
+	}
+	if cfg.ModemDevicePrefix != "/tmp/ttySL" {
+		t.Errorf("ModemDevicePrefix = %q, want /tmp/ttySL", cfg.ModemDevicePrefix)
 	}
 }

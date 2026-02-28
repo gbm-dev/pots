@@ -165,7 +165,11 @@ func (m MenuModel) View() string {
 		}
 		parts = append(parts, m.theme.ErrorStyle.Render(sipText))
 	default:
-		parts = append(parts, m.theme.LabelStyle.Render("○ SIP checking..."))
+		if m.sipInfo.Trunk == "dmodem" {
+			parts = append(parts, m.theme.LabelStyle.Render("○ SIP managed by dmodem"))
+		} else {
+			parts = append(parts, m.theme.LabelStyle.Render("○ SIP checking..."))
+		}
 	}
 
 	parts = append(parts, m.theme.LabelStyle.Render(fmt.Sprintf("%d/%d ports", m.freePorts, m.totalPorts)))

@@ -120,7 +120,7 @@ func TestPoolActiveSites(t *testing.T) {
 
 func TestNewPoolWithRealFiles(t *testing.T) {
 	// NewPool checks /dev/ttyIAX* which won't exist in tests
-	p := NewPool(4)
+	p := NewPool(4, "/dev/ttyIAX")
 	_, total := p.Available()
 	if total != 0 {
 		t.Logf("found %d real devices (expected on dev machine)", total)

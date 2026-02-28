@@ -38,7 +38,7 @@ func main() {
 	log.Printf("loaded %d sites from %s", len(sites), cfg.SitesPath)
 
 	// Create modem pool
-	pool := modem.NewPool(cfg.ModemCount)
+	pool := modem.NewPool(cfg.ModemCount, cfg.ModemDevicePrefix)
 	free, total := pool.Available()
 	log.Printf("modem pool: %d/%d devices available", free, total)
 

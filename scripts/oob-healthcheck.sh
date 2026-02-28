@@ -12,6 +12,10 @@
 VERBOSE=false
 [[ "${1:-}" == "--verbose" ]] && VERBOSE=true
 
+MODEM_BACKEND=${MODEM_BACKEND:-dmodem}
+MODEM_COUNT=${MODEM_COUNT:-8}
+MODEM_DEVICE_PREFIX=${MODEM_DEVICE_PREFIX:-/dev/ttyIAX}
+
 FAILURES=0
 WARNINGS=0
 STATUS_LINES=()
@@ -42,27 +46,37 @@ check "oob-hub running" critical \
 check "SSH listening on 2222" critical \
     bash -c 'echo | timeout 5 bash -c "cat < /dev/tcp/127.0.0.1/2222" 2>/dev/null; [[ $? -ne 1 ]]'
 
-# 3. Asterisk running
-check "Asterisk running" critical \
-    asterisk -rx "core show version"
+# 3. Backend process running
+if [[ "${MODEM_BACKEND}" == "iaxmodem" ]]; then
+    check "Asterisk running" critical \
+        asterisk -rx "core show version"
+else
+    check "slmodemd running" critical \
+        pgrep -x slmodemd
+fi
 
-# 4. At least one IAXmodem device exists
-check "IAXmodem devices present" critical \
-    bash -c 'ls /dev/ttyIAX* >/dev/null 2>&1'
+# 4. At least one modem device exists
+check "Modem devices present" critical \
+    bash -c "ls ${MODEM_DEVICE_PREFIX}* >/dev/null 2>&1"
 
 # --- Warning checks (alert but don't restart) ---
 
-# 5. Telnyx SIP trunk registered
-check "Telnyx trunk registered" warning \
-    bash -c 'asterisk -rx "pjsip show registrations" 2>/dev/null | grep -qi "registered"'
+# 5. Telnyx SIP trunk registered (Asterisk backend only)
+if [[ "${MODEM_BACKEND}" == "iaxmodem" ]]; then
+    check "Telnyx trunk registered" warning \
+        bash -c 'asterisk -rx "pjsip show registrations" 2>/dev/null | grep -qi "registered"'
+else
+    # dmodem handles SIP itself; ensure modem application processes exist.
+    check "d-modem process(es) running" warning \
+        bash -c 'pgrep -f "/usr/local/bin/d-modem" >/dev/null 2>&1'
+fi
 
 # 6. All expected modem devices present
-MODEM_COUNT=${MODEM_COUNT:-8}
 check "All ${MODEM_COUNT} modem devices present" warning \
     bash -c "
         count=0
         for i in \$(seq 0 $((MODEM_COUNT - 1))); do
-            [[ -e /dev/ttyIAX\${i} ]] && count=\$((count + 1))
+            [[ -e ${MODEM_DEVICE_PREFIX}\${i} ]] && count=\$((count + 1))
         done
         [[ \$count -eq ${MODEM_COUNT} ]]
     "

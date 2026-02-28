@@ -2,6 +2,7 @@ package tui
 
 import (
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -36,6 +37,9 @@ func (s SIPInfo) String() string {
 	case SIPUnregistered:
 		return "SIP: not registered"
 	default:
+		if s.Trunk == "dmodem" {
+			return "SIP: managed by dmodem"
+		}
 		return "SIP: checking..."
 	}
 }
@@ -45,6 +49,11 @@ type sipStatusMsg SIPInfo
 
 // checkSIPStatus runs `asterisk -rx "pjsip show registrations"` and parses output.
 func checkSIPStatus() tea.Msg {
+	if os.Getenv("MODEM_BACKEND") == "dmodem" {
+		// d-modem handles SIP directly and does not expose Asterisk registration state.
+		return sipStatusMsg(SIPInfo{Status: SIPUnknown, Trunk: "dmodem"})
+	}
+
 	out, err := exec.Command("asterisk", "-rx", "pjsip show registrations").CombinedOutput()
 	if err != nil {
 		log.Printf("[sip] asterisk query failed: %v", err)
