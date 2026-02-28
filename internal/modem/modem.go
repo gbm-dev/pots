@@ -92,6 +92,15 @@ func (m *Modem) Init(timeout time.Duration) error {
 		return fmt.Errorf("ATE0 returned ERROR: %s", cleanResponse(resp))
 	}
 
+	// Enable blind dialing (ignore dial tone)
+	resp, err = m.runAT("ATX3", timeout, "OK", "ERROR")
+	if err != nil {
+		return fmt.Errorf("ATX3: no response (%w)", err)
+	}
+	if strings.Contains(resp, "ERROR") {
+		return fmt.Errorf("ATX3 returned ERROR: %s", cleanResponse(resp))
+	}
+
 	// Drain again after reset to clear any echo/noise
 	m.drain()
 	return nil
