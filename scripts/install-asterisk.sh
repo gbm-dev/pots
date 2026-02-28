@@ -18,12 +18,18 @@ fi
 echo "=== Asterisk ${ASTERISK_VERSION} LTS Installer ==="
 echo ""
 
-# --- Remove apt Asterisk if present ---
-if dpkg -l asterisk 2>/dev/null | grep -q '^ii'; then
+# --- Remove apt Asterisk completely ---
+if dpkg -l asterisk 2>/dev/null | grep -qE '^ii|^rc'; then
     echo "Removing apt-installed Asterisk..."
-    apt-get remove -y asterisk asterisk-modules asterisk-core-sounds-en 2>/dev/null || true
+    apt-get remove --purge -y 'asterisk*' 2>/dev/null || true
     apt-get autoremove -y 2>/dev/null || true
     echo "  Done."
+fi
+
+# Clean up any leftover apt modules
+if [[ -d /usr/lib/x86_64-linux-gnu/asterisk ]]; then
+    echo "Removing leftover apt Asterisk modules..."
+    rm -rf /usr/lib/x86_64-linux-gnu/asterisk
 fi
 
 # --- Install build dependencies ---
@@ -60,59 +66,25 @@ cd "${AST_SRC}"
 echo "Installing Asterisk prerequisites..."
 contrib/scripts/install_prereq install
 
-# --- Configure ---
+# --- Configure (install to /usr so it replaces the apt paths) ---
 echo "Configuring Asterisk..."
-./configure --with-jansson-bundled 2>&1 | tail -5
+./configure --prefix=/usr --with-jansson-bundled 2>&1 | tail -5
 
-# --- Build with minimal modules ---
+# --- Build ---
 echo "Building Asterisk (this takes a few minutes)..."
-make menuselect.makeopts
-
-# Enable only what we need via menuselect CLI
-menuselect/menuselect \
-    --disable-all \
-    --enable res_pjproject \
-    --enable res_pjsip \
-    --enable res_pjsip_authenticator_digest \
-    --enable res_pjsip_outbound_authenticator_digest \
-    --enable res_pjsip_endpoint_identifier_ip \
-    --enable res_pjsip_endpoint_identifier_user \
-    --enable res_pjsip_outbound_registration \
-    --enable res_pjsip_session \
-    --enable res_pjsip_sdp_rtp \
-    --enable res_pjsip_caller_id \
-    --enable res_pjsip_nat \
-    --enable res_pjsip_rfc3326 \
-    --enable res_pjsip_dtmf_info \
-    --enable res_pjsip_logger \
-    --enable res_pjsip_config_wizard \
-    --enable chan_pjsip \
-    --enable res_rtp_asterisk \
-    --enable res_sorcery_config \
-    --enable res_sorcery_memory \
-    --enable res_sorcery_astdb \
-    --enable res_timing_timerfd \
-    --enable codec_ulaw \
-    --enable pbx_config \
-    --enable app_dial \
-    --enable app_playback \
-    --enable format_pcm \
-    --enable format_gsm \
-    menuselect.makeopts
-
 make -j"$(nproc)"
 
 # --- Install ---
 echo "Installing Asterisk..."
 make install
-make config  # init scripts
 
 # --- Verify ---
 echo ""
 echo "=== Installed ==="
 asterisk -V
 echo ""
-echo "Asterisk ${ASTERISK_VERSION} LTS installed to /usr/sbin/asterisk"
-echo "Modules in /usr/lib/asterisk/modules/"
+echo "Module directory:"
+ls /usr/lib/asterisk/modules/chan_pjsip.so 2>/dev/null && echo "  chan_pjsip.so: OK" || echo "  chan_pjsip.so: MISSING"
+ls /usr/lib/asterisk/modules/res_pjsip.so 2>/dev/null && echo "  res_pjsip.so: OK" || echo "  res_pjsip.so: MISSING"
 echo ""
 echo "To start: ./scripts/local-dev.sh"

@@ -116,6 +116,7 @@ astetcdir => ${ASTERISK_TMP}
 astlogdir => ${LOG_DIR}
 astrundir => ${ASTERISK_TMP}/run
 astspooldir => ${ASTERISK_TMP}/spool
+astmoddir => /usr/lib/asterisk/modules
 
 [options]
 verbose = 5
