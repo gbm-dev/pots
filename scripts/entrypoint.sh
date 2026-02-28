@@ -46,7 +46,8 @@ chmod 1777 /var/log/oob-sessions
 DEVICE_PATH=${DEVICE_PATH:-/dev/ttySL0}
 
 echo "Starting D-Modem..."
-slmodemd -e /usr/local/bin/d-modem &
+# Limit file descriptors to 1024 to avoid FD_SETSIZE crash in 32-bit slmodemd
+sh -c "ulimit -n 1024; slmodemd -e /usr/local/bin/d-modem" &
 DMODEM_PID=$!
 echo "  D-Modem started (PID ${DMODEM_PID})"
 

@@ -3,7 +3,8 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install Asterisk and minimal utilities
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-install-recommends \
+    libc6:i386 \
     asterisk \
     asterisk-modules \
     asterisk-core-sounds-en-gsm \
@@ -14,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install prebuilt D-Modem binaries from fork release
-ARG DMODEM_VERSION=v0.1.0
+ARG DMODEM_VERSION=v0.1.1
 RUN wget -O /usr/local/bin/slmodemd \
         "https://github.com/gbm-dev/D-Modem/releases/download/${DMODEM_VERSION}/slmodemd" \
     && wget -O /usr/local/bin/d-modem \

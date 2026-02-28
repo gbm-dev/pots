@@ -66,12 +66,18 @@ if [[ "${1:-}" == "ast" ]]; then
     exec asterisk -rx "${AST_CMD}"
 fi
 
-# --- Verify binaries exist ---
-for bin in "$SLMODEMD_BIN" "$DMODEM_BIN"; do
-    if [[ ! -x "$bin" ]]; then
-        echo "ERROR: $bin not found or not executable"
-        echo "Download from: https://github.com/gbm-dev/D-Modem/releases"
-        exit 1
+# --- Verify binaries exist (Download if missing) ---
+DMODEM_VERSION="v0.1.1"
+DMODEM_BASE_URL="https://github.com/gbm-dev/D-Modem/releases/download/${DMODEM_VERSION}"
+
+mkdir -p "${PROJECT_DIR}/bin"
+
+for bin_path in "$SLMODEMD_BIN" "$DMODEM_BIN"; do
+    if [[ ! -x "$bin_path" ]]; then
+        bin_name=$(basename "$bin_path")
+        echo "Binary $bin_name not found, downloading $DMODEM_VERSION..."
+        curl -L -o "$bin_path" "${DMODEM_BASE_URL}/${bin_name}"
+        chmod +x "$bin_path"
     fi
 done
 
@@ -131,7 +137,8 @@ fi
 
 # --- Start D-Modem (slmodemd + d-modem) ---
 echo "Starting D-Modem..."
-sudo "$SLMODEMD_BIN" -d9 -e "$DMODEM_BIN" &
+# Limit file descriptors to 1024 to avoid FD_SETSIZE crash in 32-bit slmodemd
+sudo sh -c "ulimit -n 1024; \"$SLMODEMD_BIN\" -d9 -e \"$DMODEM_BIN\"" &
 PIDS+=($!)
 echo "  slmodemd PID: ${PIDS[-1]}"
 
