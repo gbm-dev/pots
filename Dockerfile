@@ -1,59 +1,129 @@
+# Stage 1: Build Go binaries
+FROM golang:1.23-alpine AS go-builder
+WORKDIR /app
+COPY . .
+RUN go build -o /usr/local/bin/oob-hub ./cmd/oob-hub/main.go \
+    && go build -o /usr/local/bin/oob-probe ./cmd/oob-probe/main.go \
+    && go build -o /usr/local/bin/oob-manage ./cmd/oob-manage/main.go
+
+# Stage 2: Final image
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install Asterisk and minimal utilities
+# Install Asterisk 22 build dependencies and minimal utilities
 RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-install-recommends \
-    libc6:i386 \
-    asterisk \
-    asterisk-modules \
-    asterisk-core-sounds-en-gsm \
+    build-essential \
+    wget \
+    libncurses-dev \
+    libssl-dev \
+    libxml2-dev \
+    libsqlite3-dev \
+    uuid-dev \
+    libjansson-dev \
+    libedit-dev \
+    ca-certificates \
     psmisc \
     procps \
-    ca-certificates \
-    wget \
+    libc6:i386 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install prebuilt D-Modem binaries from fork release
-ARG DMODEM_VERSION=v0.1.2
+# Build and Install Asterisk 22 LTS (Minimal PJSIP only)
+# This matches our verified local source build process.
+WORKDIR /usr/local/src
+RUN wget -q "http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-22-current.tar.gz" \
+    && tar xzf asterisk-22-current.tar.gz \
+    && rm asterisk-22-current.tar.gz \
+    && cd asterisk-22.*/ \
+    && ./contrib/scripts/install_prereq install -y \
+    && ./configure --prefix=/usr --with-jansson-bundled --with-pjproject-bundled 2>&1 | tail -5 \
+    && make menuselect.makeopts \
+    && ./menuselect/menuselect --disable-all menuselect.makeopts \
+    && ./menuselect/menuselect \
+        --enable res_pjproject \
+        --enable res_pjsip \
+        --enable res_pjsip_authenticator_digest \
+        --enable res_pjsip_outbound_authenticator_digest \
+        --enable res_pjsip_endpoint_identifier_ip \
+        --enable res_pjsip_endpoint_identifier_user \
+        --enable res_pjsip_outbound_registration \
+        --enable res_pjsip_session \
+        --enable res_pjsip_sdp_rtp \
+        --enable res_pjsip_caller_id \
+        --enable res_pjsip_nat \
+        --enable res_pjsip_rfc3326 \
+        --enable res_pjsip_dtmf_info \
+        --enable res_pjsip_logger \
+        --enable res_pjsip_config_wizard \
+        --enable res_pjsip_pubsub \
+        --enable res_pjsip_outbound_publish \
+        --enable res_geolocation \
+        --enable res_statsd \
+        --enable chan_pjsip \
+        --enable res_rtp_asterisk \
+        --enable res_sorcery_config \
+        --enable res_sorcery_memory \
+        --enable res_sorcery_astdb \
+        --enable res_timing_timerfd \
+        --enable codec_ulaw \
+        --enable codec_alaw \
+        --enable codec_gsm \
+        --enable pbx_config \
+        --enable app_dial \
+        --enable app_echo \
+        --enable app_playback \
+        --enable format_pcm \
+        --enable format_wav \
+        --enable format_gsm \
+        --enable bridge_simple \
+        --enable bridge_native_rtp \
+        --enable func_callerid \
+        --enable func_logic \
+        menuselect.makeopts \
+    && make -j$(nproc) \
+    && make install \
+    && cd .. && rm -rf asterisk-22.*/
+
+# Install prebuilt slmodemd/d-modem binaries
+ARG DMODEM_VERSION=v0.1.6
 RUN wget -O /usr/local/bin/slmodemd \
         "https://github.com/gbm-dev/D-Modem/releases/download/${DMODEM_VERSION}/slmodemd" \
     && wget -O /usr/local/bin/d-modem \
         "https://github.com/gbm-dev/D-Modem/releases/download/${DMODEM_VERSION}/d-modem" \
     && chmod +x /usr/local/bin/slmodemd /usr/local/bin/d-modem
 
+# Copy Go binaries from builder
+COPY --from=go-builder /usr/local/bin/oob-hub /usr/local/bin/oob-hub
+COPY --from=go-builder /usr/local/bin/oob-probe /usr/local/bin/oob-probe
+COPY --from=go-builder /usr/local/bin/oob-manage /usr/local/bin/oob-manage
+
 # Create directories
-RUN mkdir -p /var/log/oob-sessions
+RUN mkdir -p /var/log/oob-sessions /var/log/asterisk /var/lib/asterisk /var/spool/asterisk /etc/asterisk
 
 # Copy Asterisk configuration
-COPY config/asterisk/pjsip.conf /etc/asterisk/pjsip.conf
-COPY config/asterisk/pjsip_wizard.conf /etc/asterisk/pjsip_wizard.conf
-COPY config/asterisk/extensions.conf /etc/asterisk/extensions.conf
-COPY config/asterisk/modules.conf /etc/asterisk/modules.conf
+COPY config/asterisk/*.conf /etc/asterisk/
 
 # Copy site configuration
 COPY config/oob-sites.conf /etc/oob-sites.conf
 
-# Copy scripts (only startup/infra scripts)
+# Copy scripts
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY scripts/oob-healthcheck.sh /usr/local/bin/oob-healthcheck.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/oob-healthcheck.sh
 
-RUN chmod +x /usr/local/bin/entrypoint.sh \
-             /usr/local/bin/oob-healthcheck.sh
+WORKDIR /app
 
-# Install Go binaries from GitHub release — this layer MUST be after COPY
-# so that any repo change (scripts, configs) busts the cache above it.
-# Pass --build-arg POTS_VERSION=v1.2.0 to pin, or it downloads latest.
-ARG POTS_VERSION=latest
-RUN set -eux; \
-    if [ "$POTS_VERSION" = "latest" ]; then \
-        DL_URL="https://github.com/gbm-dev/pots/releases/latest/download"; \
-    else \
-        DL_URL="https://github.com/gbm-dev/pots/releases/download/${POTS_VERSION}"; \
-    fi; \
-    wget -O /usr/local/bin/oob-hub "${DL_URL}/oob-hub" \
-    && wget -O /usr/local/bin/oob-manage "${DL_URL}/oob-manage" \
-    && chmod +x /usr/local/bin/oob-hub /usr/local/bin/oob-manage
+# Expose ports
+# 2222 - SSH (Go TUI)
+# 5060 - SIP (UDP)
+# 10000-10100 - RTP media
+EXPOSE 2222/tcp 5060/udp 10000-10100/udp
+
+# Docker-level health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD /usr/local/bin/oob-healthcheck.sh || exit 1
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # Expose ports
 # 2222 - SSH (Go TUI)
