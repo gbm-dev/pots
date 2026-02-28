@@ -42,29 +42,26 @@ echo "Telnyx telephony config populated."
 mkdir -p /var/log/oob-sessions
 chmod 1777 /var/log/oob-sessions
 
-# --- Generate IAXmodem configs ---
-/usr/local/bin/setup-iaxmodem.sh
+# --- Start D-Modem (slmodemd + d-modem) ---
+DEVICE_PATH=${DEVICE_PATH:-/dev/ttySL0}
 
-# --- Start IAXmodem instances ---
-MODEM_COUNT=${MODEM_COUNT:-8}
-echo "Starting ${MODEM_COUNT} IAXmodem instances..."
+echo "Starting D-Modem..."
+slmodemd -e /usr/local/bin/d-modem &
+DMODEM_PID=$!
+echo "  D-Modem started (PID ${DMODEM_PID})"
 
-for i in $(seq 0 $((MODEM_COUNT - 1))); do
-    iaxmodem "ttyIAX${i}" &
-    echo "  Started IAXmodem ttyIAX${i} (PID $!)"
-done
-
-# Give IAXmodem a moment to create PTYs
-sleep 2
-
-# Verify modem devices
-echo "Modem devices:"
-for i in $(seq 0 $((MODEM_COUNT - 1))); do
-    if [[ -e "/dev/ttyIAX${i}" ]]; then
-        echo "  /dev/ttyIAX${i} - OK"
-    else
-        echo "  /dev/ttyIAX${i} - MISSING (IAXmodem may have failed)"
+# Wait for modem device to appear
+echo "Waiting for ${DEVICE_PATH}..."
+for i in $(seq 1 10); do
+    if [[ -e "${DEVICE_PATH}" ]]; then
+        echo "  ${DEVICE_PATH} - OK"
+        break
     fi
+    if [ "$i" -eq 10 ]; then
+        echo "  ERROR: ${DEVICE_PATH} did not appear after 10s"
+        exit 1
+    fi
+    sleep 1
 done
 
 # --- Start Asterisk ---
@@ -84,6 +81,7 @@ fi
 # --- Start Go SSH server (replaces sshd) ---
 echo "=== OOB Console Hub Ready ==="
 echo "SSH server listening on :${SSH_PORT:-2222}"
+echo "Modem device: ${DEVICE_PATH}"
 echo "Manage users with: docker exec oob-console-hub oob-manage <command>"
 
 exec /usr/local/bin/oob-hub

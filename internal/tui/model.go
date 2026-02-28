@@ -18,7 +18,7 @@ type Model struct {
 	theme    Theme
 
 	// Dependencies
-	pool  *modem.Pool
+	lock  *modem.DeviceLock
 	store auth.UserStore
 	sites []config.Site
 
@@ -34,7 +34,7 @@ type Model struct {
 }
 
 // New creates the root TUI model.
-func New(username string, sites []config.Site, pool *modem.Pool, store auth.UserStore, logDir string, forcePassword bool, renderer *lipgloss.Renderer) Model {
+func New(username string, sites []config.Site, lock *modem.DeviceLock, store auth.UserStore, logDir string, forcePassword bool, renderer *lipgloss.Renderer) Model {
 	state := StateMenu
 	if forcePassword {
 		state = StatePasswordChange
@@ -44,7 +44,7 @@ func New(username string, sites []config.Site, pool *modem.Pool, store auth.User
 		state:    state,
 		username: username,
 		logDir:   logDir,
-		pool:     pool,
+		lock:     lock,
 		store:    store,
 		sites:    sites,
 		width:    80,
@@ -55,7 +55,7 @@ func New(username string, sites []config.Site, pool *modem.Pool, store auth.User
 	if forcePassword {
 		m.password = NewPasswordModel(username, store, m.theme)
 	} else {
-		m.menu = NewMenuModel(sites, username, pool, m.width, m.height, m.theme)
+		m.menu = NewMenuModel(sites, username, lock, m.width, m.height, m.theme)
 	}
 
 	return m
@@ -110,7 +110,7 @@ func (m Model) View() string {
 func (m Model) updatePasswordChange(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg.(type) {
 	case PasswordChangedMsg:
-		m.menu = NewMenuModel(m.sites, m.username, m.pool, m.width, m.height, m.theme)
+		m.menu = NewMenuModel(m.sites, m.username, m.lock, m.width, m.height, m.theme)
 		m.state = StateMenu
 		return m, m.menu.Init()
 	case ErrorMsg:
@@ -129,7 +129,7 @@ func (m Model) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case DialRequestMsg:
 		if msg.SiteIndex >= 0 && msg.SiteIndex < len(m.sites) {
 			m.activeSite = m.sites[msg.SiteIndex]
-			m.dialing = NewDialingModel(m.activeSite, m.pool, m.theme)
+			m.dialing = NewDialingModel(m.activeSite, m.lock, m.theme)
 			m.state = StateDialing
 			return m, m.dialing.Init()
 		}
@@ -148,7 +148,7 @@ func (m Model) updateDialing(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeDevice = msg.Device
 			m.state = StateConnected
 
-			ts := NewTerminalSession(msg.Modem, msg.Device, m.activeSite.Name, m.logDir, m.pool)
+			ts := NewTerminalSession(msg.Modem, msg.Device, m.activeSite.Name, m.logDir, m.lock)
 			return m, tea.Exec(ts, func(err error) tea.Msg {
 				return TerminalDoneMsg{Err: err}
 			})
@@ -177,7 +177,7 @@ func (m Model) updateConnected(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) returnToMenu() (tea.Model, tea.Cmd) {
-	m.menu = NewMenuModel(m.sites, m.username, m.pool, m.width, m.height, m.theme)
+	m.menu = NewMenuModel(m.sites, m.username, m.lock, m.width, m.height, m.theme)
 	m.state = StateMenu
 	m.activeModem = nil
 	m.activeDevice = ""

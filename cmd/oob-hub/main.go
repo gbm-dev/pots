@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,37 +15,41 @@ import (
 )
 
 func main() {
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})))
 
 	cfg := config.LoadFromEnv()
 
 	// Init user store
 	store, err := auth.NewFileStore(cfg.UserDataDir)
 	if err != nil {
-		log.Fatalf("initializing user store: %v", err)
+		slog.Error("initializing user store", "err", err)
+		os.Exit(1)
 	}
 
 	// Run legacy migration if old files exist
 	if err := auth.MigrateFromLegacy(cfg.UserDataDir, store); err != nil {
-		log.Printf("warning: legacy migration failed: %v", err)
+		slog.Warn("legacy migration failed", "err", err)
 	}
 
 	// Parse site config
 	sites, err := config.ParseSitesFile(cfg.SitesPath)
 	if err != nil {
-		log.Fatalf("loading sites config: %v", err)
+		slog.Error("loading sites config", "err", err)
+		os.Exit(1)
 	}
-	log.Printf("loaded %d sites from %s", len(sites), cfg.SitesPath)
+	slog.Info("sites loaded", "count", len(sites), "path", cfg.SitesPath)
 
-	// Create modem pool
-	pool := modem.NewPool(cfg.ModemCount)
-	free, total := pool.Available()
-	log.Printf("modem pool: %d/%d devices available", free, total)
+	// Create modem device lock
+	lock := modem.NewDeviceLock(cfg.DevicePath)
+	slog.Info("modem device configured", "device", cfg.DevicePath)
 
 	// Start SSH server
-	srv, err := sshserver.New(cfg, store, pool, sites)
+	srv, err := sshserver.New(cfg, store, lock, sites)
 	if err != nil {
-		log.Fatalf("creating SSH server: %v", err)
+		slog.Error("creating SSH server", "err", err)
+		os.Exit(1)
 	}
 
 	// Signal handling for graceful shutdown
@@ -54,19 +58,20 @@ func main() {
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
-			log.Fatalf("SSH server error: %v", err)
+			slog.Error("SSH server error", "err", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-done
-	log.Println("shutting down...")
+	slog.Info("shutting down")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("shutdown error: %v", err)
+		slog.Error("shutdown error", "err", err)
 	}
 
-	log.Println("shutdown complete")
+	slog.Info("shutdown complete")
 }

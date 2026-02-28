@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"log"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"time"
@@ -47,13 +47,13 @@ type sipStatusMsg SIPInfo
 func checkSIPStatus() tea.Msg {
 	out, err := exec.Command("asterisk", "-rx", "pjsip show registrations").CombinedOutput()
 	if err != nil {
-		log.Printf("[sip] asterisk query failed: %v", err)
+		slog.Warn("asterisk query failed", "err", err)
 		return sipStatusMsg(SIPInfo{Status: SIPUnregistered})
 	}
 
 	output := string(out)
 	info := parseSIPRegistrations(output)
-	log.Printf("[sip] status: %s", info)
+	slog.Debug("sip status", "status", info.String())
 	return sipStatusMsg(info)
 }
 

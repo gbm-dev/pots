@@ -11,37 +11,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     ca-certificates \
     wget \
-    libtiff6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install prebuilt iaxmodem binary from GitHub release
-RUN wget -O /usr/local/bin/iaxmodem \
-        "https://github.com/gbm-dev/pots/releases/download/v0.1.0/iaxmodem" \
-    && chmod +x /usr/local/bin/iaxmodem
+# Install prebuilt D-Modem binaries from fork release
+ARG DMODEM_VERSION=v0.1.0
+RUN wget -O /usr/local/bin/slmodemd \
+        "https://github.com/gbm-dev/D-Modem/releases/download/${DMODEM_VERSION}/slmodemd" \
+    && wget -O /usr/local/bin/d-modem \
+        "https://github.com/gbm-dev/D-Modem/releases/download/${DMODEM_VERSION}/d-modem" \
+    && chmod +x /usr/local/bin/slmodemd /usr/local/bin/d-modem
 
 # Create directories
-RUN mkdir -p /var/log/oob-sessions /etc/iaxmodem /var/log/iaxmodem
+RUN mkdir -p /var/log/oob-sessions
 
 # Copy Asterisk configuration
 COPY config/asterisk/pjsip.conf /etc/asterisk/pjsip.conf
 COPY config/asterisk/pjsip_wizard.conf /etc/asterisk/pjsip_wizard.conf
 COPY config/asterisk/extensions.conf /etc/asterisk/extensions.conf
-COPY config/asterisk/iax.conf /etc/asterisk/iax.conf
 COPY config/asterisk/modules.conf /etc/asterisk/modules.conf
-
-# Copy IAXmodem template
-COPY config/iaxmodem/ /etc/iaxmodem-templates/
 
 # Copy site configuration
 COPY config/oob-sites.conf /etc/oob-sites.conf
 
 # Copy scripts (only startup/infra scripts)
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY scripts/setup-iaxmodem.sh /usr/local/bin/setup-iaxmodem.sh
 COPY scripts/oob-healthcheck.sh /usr/local/bin/oob-healthcheck.sh
 
 RUN chmod +x /usr/local/bin/entrypoint.sh \
-             /usr/local/bin/setup-iaxmodem.sh \
              /usr/local/bin/oob-healthcheck.sh
 
 # Install Go binaries from GitHub release — this layer MUST be after COPY

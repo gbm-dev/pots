@@ -3,7 +3,7 @@ package modem
 import (
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -64,7 +64,7 @@ func Open(devicePath string) (*Modem, error) {
 		dev:  f,
 		path: devicePath,
 	}
-	log.Printf("[modem] opened %s", devicePath)
+	slog.Debug("modem opened", "device", devicePath)
 	return m, nil
 }
 
@@ -97,6 +97,22 @@ func (m *Modem) Init(timeout time.Duration) error {
 	return nil
 }
 
+// Configure sends a sequence of AT commands (e.g. AT+MS=132,0,4800,9600).
+// Each command must return OK within the timeout. Called after Init, before Dial.
+func (m *Modem) Configure(commands []string, timeout time.Duration) error {
+	for _, cmd := range commands {
+		m.drain()
+		resp, err := m.runAT(cmd, timeout, "OK", "ERROR")
+		if err != nil {
+			return fmt.Errorf("%s: no response (%w)", cmd, err)
+		}
+		if strings.Contains(resp, "ERROR") {
+			return fmt.Errorf("%s returned ERROR: %s", cmd, cleanResponse(resp))
+		}
+	}
+	return nil
+}
+
 // Dial sends ATDT and returns the result with full transcript.
 func (m *Modem) Dial(phone string, timeout time.Duration) (DialResponse, error) {
 	// Drain before dialing to ensure clean buffer
@@ -115,7 +131,7 @@ func (m *Modem) Dial(phone string, timeout time.Duration) (DialResponse, error) 
 	transcript := m.log.String()
 
 	if err != nil {
-		log.Printf("[modem] %s dial timeout\n%s", m.path, transcript)
+		slog.Warn("modem dial timeout", "device", m.path, "transcript", transcript)
 		return DialResponse{Result: ResultTimeout, Transcript: transcript}, nil
 	}
 
@@ -133,7 +149,7 @@ func (m *Modem) Dial(phone string, timeout time.Duration) (DialResponse, error) 
 		result = ResultError
 	}
 
-	log.Printf("[modem] %s dial result: %s\n%s", m.path, result, transcript)
+	slog.Info("modem dial result", "device", m.path, "result", result.String(), "transcript", transcript)
 	return DialResponse{Result: result, Transcript: transcript}, nil
 }
 
@@ -144,7 +160,7 @@ func (m *Modem) Transcript() string {
 
 // Hangup sends the escape sequence and ATH to hang up.
 func (m *Modem) Hangup() error {
-	log.Printf("[modem] %s hangup", m.path)
+	slog.Debug("modem hangup", "device", m.path)
 	time.Sleep(1100 * time.Millisecond)
 	if _, err := m.dev.Write([]byte("+++")); err != nil {
 		return fmt.Errorf("sending escape: %w", err)
@@ -164,7 +180,7 @@ func (m *Modem) ReadWriteCloser() io.ReadWriteCloser {
 
 // Close closes the modem device.
 func (m *Modem) Close() error {
-	log.Printf("[modem] %s closed", m.path)
+	slog.Debug("modem closed", "device", m.path)
 	return m.dev.Close()
 }
 
@@ -175,7 +191,7 @@ func (m *Modem) drain() {
 	for {
 		n, err := m.dev.Read(buf)
 		if n > 0 {
-			log.Printf("[modem] %s drain: %d bytes", m.path, n)
+			slog.Debug("modem drain", "device", m.path, "bytes", n)
 		}
 		if err != nil {
 			break
@@ -187,7 +203,7 @@ func (m *Modem) drain() {
 func (m *Modem) logCmd(cmd string) {
 	line := fmt.Sprintf(">>> %s\n", cmd)
 	m.log.WriteString(line)
-	log.Printf("[modem] %s send: %s", m.path, cmd)
+	slog.Debug("modem send", "device", m.path, "cmd", cmd)
 }
 
 func (m *Modem) logResp(resp string) {
@@ -195,7 +211,7 @@ func (m *Modem) logResp(resp string) {
 	if cleaned != "" {
 		line := fmt.Sprintf("<<< %s\n", cleaned)
 		m.log.WriteString(line)
-		log.Printf("[modem] %s recv: %s", m.path, cleaned)
+		slog.Debug("modem recv", "device", m.path, "resp", cleaned)
 	}
 }
 
