@@ -29,13 +29,13 @@ sudo systemctl start oob-watchdog.timer
 
 ## Updating
 
-Pull the latest and rebuild:
+Pull latest code and rebuild image (only when code/image changes):
 
 ```bash
 cd /opt/pots
 git pull
 docker compose build
-docker compose down && docker compose up -d
+sudo systemctl reload oob-hub
 ```
 
 Pin a specific release version in the build:
@@ -73,10 +73,17 @@ You can prebuild D-Modem binaries once and reuse them in future image builds:
 
 ```bash
 ./scripts/build-dmodem-artifacts.sh
-DMODEM_SOURCE=prebuilt docker compose build
+echo "DMODEM_SOURCE=prebuilt" >> .env
+docker compose build
 ```
 
 The binaries are written to `third_party/dmodem/`.
+
+For normal restarts/deploys after that, no rebuild is needed:
+
+```bash
+sudo systemctl restart oob-hub
+```
 
 ## User Management
 
