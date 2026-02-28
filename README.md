@@ -41,10 +41,11 @@ docker compose down && docker compose up -d
 Pin a specific release version in the build:
 
 ```bash
-docker compose build --build-arg POTS_VERSION=v1.0.0
+git checkout v1.0.0
+docker compose build
 ```
 
-Go binaries are built by GitHub Actions and downloaded from [releases](https://github.com/gbm-dev/pots/releases) during `docker compose build` — no Go toolchain needed on the server.
+Go binaries are compiled from local source during `docker compose build`.
 
 ### Telnyx Caller ID Requirement
 

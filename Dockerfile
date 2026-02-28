@@ -1,6 +1,7 @@
 FROM ubuntu:24.04 AS dmodem-builder
 
 ENV DEBIAN_FRONTEND=noninteractive
+ARG DMODEM_REF=59cacd766de7e093c9ef2109f146f417f2b6a945
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -15,8 +16,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN git clone https://git.jerryxiao.cc/Jerry/D-Modem /tmp/dmodem \
     && cd /tmp/dmodem \
+    && git checkout "${DMODEM_REF}" \
     && git submodule update --init --recursive \
     && make NO_PULSE=1
+
+FROM golang:1.25 AS go-builder
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/oob-hub ./cmd/oob-hub \
+    && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/oob-manage ./cmd/oob-manage
 
 FROM ubuntu:24.04
 
@@ -71,19 +86,9 @@ RUN chmod +x /usr/local/bin/entrypoint.sh \
              /usr/local/bin/start-dmodem.sh \
              /usr/local/bin/oob-healthcheck.sh
 
-# Install Go binaries from GitHub release — this layer MUST be after COPY
-# so that any repo change (scripts, configs) busts the cache above it.
-# Pass --build-arg POTS_VERSION=v1.2.0 to pin, or it downloads latest.
-ARG POTS_VERSION=latest
-RUN set -eux; \
-    if [ "$POTS_VERSION" = "latest" ]; then \
-        DL_URL="https://github.com/gbm-dev/pots/releases/latest/download"; \
-    else \
-        DL_URL="https://github.com/gbm-dev/pots/releases/download/${POTS_VERSION}"; \
-    fi; \
-    wget -O /usr/local/bin/oob-hub "${DL_URL}/oob-hub" \
-    && wget -O /usr/local/bin/oob-manage "${DL_URL}/oob-manage" \
-    && chmod +x /usr/local/bin/oob-hub /usr/local/bin/oob-manage
+# Install Go binaries built from local source.
+COPY --from=go-builder /out/oob-hub /usr/local/bin/oob-hub
+COPY --from=go-builder /out/oob-manage /usr/local/bin/oob-manage
 
 # Expose ports
 # 2222 - SSH (Go TUI)
