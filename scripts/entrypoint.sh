@@ -8,17 +8,35 @@ echo "=== OOB Console Hub Starting ==="
 
 # --- Substitute Telnyx credentials into PJSIP config ---
 PJSIP_CONF=/etc/asterisk/pjsip_wizard.conf
+EXTENSIONS_CONF=/etc/asterisk/extensions.conf
+
+escape_sed_replacement() {
+    printf '%s' "$1" | sed -e 's/[\/&|\\]/\\&/g'
+}
 
 if [[ -z "${TELNYX_SIP_USER:-}" || -z "${TELNYX_SIP_PASS:-}" ]]; then
     echo "WARNING: TELNYX_SIP_USER or TELNYX_SIP_PASS not set!"
     echo "Asterisk will start but Telnyx trunk will not register."
 fi
 
-sed -i "s|TELNYX_SIP_USER_PLACEHOLDER|${TELNYX_SIP_USER:-unset}|g" "$PJSIP_CONF"
-sed -i "s|TELNYX_SIP_PASS_PLACEHOLDER|${TELNYX_SIP_PASS:-unset}|g" "$PJSIP_CONF"
-sed -i "s|TELNYX_SIP_DOMAIN_PLACEHOLDER|${TELNYX_SIP_DOMAIN:-sip.telnyx.com}|g" "$PJSIP_CONF"
+TELNYX_SIP_USER_ESCAPED=$(escape_sed_replacement "${TELNYX_SIP_USER:-unset}")
+TELNYX_SIP_PASS_ESCAPED=$(escape_sed_replacement "${TELNYX_SIP_PASS:-unset}")
+TELNYX_SIP_DOMAIN_ESCAPED=$(escape_sed_replacement "${TELNYX_SIP_DOMAIN:-sip.telnyx.com}")
+TELNYX_OUTBOUND_CID_ESCAPED=$(escape_sed_replacement "${TELNYX_OUTBOUND_CID:-unset}")
+TELNYX_OUTBOUND_NAME_ESCAPED=$(escape_sed_replacement "${TELNYX_OUTBOUND_NAME:-OOB-Console-Hub}")
 
-echo "Telnyx PJSIP config populated."
+if [[ -z "${TELNYX_OUTBOUND_CID:-}" ]]; then
+    echo "WARNING: TELNYX_OUTBOUND_CID not set!"
+    echo "Outbound calls may fail with provider errors like 403 Caller Origination Number is Invalid."
+fi
+
+sed -i "s|TELNYX_SIP_USER_PLACEHOLDER|${TELNYX_SIP_USER_ESCAPED}|g" "$PJSIP_CONF"
+sed -i "s|TELNYX_SIP_PASS_PLACEHOLDER|${TELNYX_SIP_PASS_ESCAPED}|g" "$PJSIP_CONF"
+sed -i "s|TELNYX_SIP_DOMAIN_PLACEHOLDER|${TELNYX_SIP_DOMAIN_ESCAPED}|g" "$PJSIP_CONF"
+sed -i "s|TELNYX_OUTBOUND_CID_PLACEHOLDER|${TELNYX_OUTBOUND_CID_ESCAPED}|g" "$EXTENSIONS_CONF"
+sed -i "s|TELNYX_OUTBOUND_NAME_PLACEHOLDER|${TELNYX_OUTBOUND_NAME_ESCAPED}|g" "$EXTENSIONS_CONF"
+
+echo "Telnyx telephony config populated."
 
 # --- Create session log directory ---
 mkdir -p /var/log/oob-sessions

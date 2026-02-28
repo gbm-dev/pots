@@ -15,7 +15,7 @@ sudo bash scripts/host-setup.sh
 Edit credentials and sites:
 
 ```bash
-nano .env                       # Telnyx SIP creds
+nano .env                       # Telnyx SIP creds + outbound caller ID
 nano config/oob-sites.conf      # Remote sites
 ```
 
@@ -45,6 +45,14 @@ docker compose build --build-arg POTS_VERSION=v1.0.0
 ```
 
 Go binaries are built by GitHub Actions and downloaded from [releases](https://github.com/gbm-dev/pots/releases) during `docker compose build` — no Go toolchain needed on the server.
+
+### Telnyx Caller ID Requirement
+
+Set `TELNYX_OUTBOUND_CID` in `.env` to a valid number on your Telnyx account (typically E.164, e.g. `+15551234567`).
+
+If this is missing or invalid, Telnyx can reject calls with errors like:
+
+`403 Caller Origination Number is Invalid`
 
 ## Site Configuration
 
