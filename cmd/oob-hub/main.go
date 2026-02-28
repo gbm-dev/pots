@@ -50,6 +50,8 @@ func main() {
 
 	// Signal handling for graceful shutdown
 	done := make(chan os.Signal, 1)
+	// Ignore hangups so transient PTY/session events don't kill PID 1.
+	signal.Ignore(syscall.SIGHUP)
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
