@@ -68,7 +68,12 @@ cd "${AST_SRC}"
 
 # --- Install Asterisk prerequisites ---
 echo "Installing Asterisk prerequisites..."
-contrib/scripts/install_prereq install
+# Use non-interactive mode to prevent script from hanging or exiting
+DEBIAN_FRONTEND=noninteractive contrib/scripts/install_prereq install -y
+
+# --- Clean and Configure ---
+echo "Cleaning old build state..."
+make distclean || true
 
 # --- Configure (install to /usr so it replaces the apt paths) ---
 echo "Configuring Asterisk..."
