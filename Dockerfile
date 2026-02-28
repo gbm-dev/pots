@@ -1,19 +1,10 @@
-# Build stage: compile Go binaries
-FROM golang:1.25-alpine AS builder
-
-WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /oob-hub ./cmd/oob-hub
-RUN CGO_ENABLED=0 GOOS=linux go build -o /oob-manage ./cmd/oob-manage
-
-# Runtime stage
 FROM ubuntu:24.04
+
+ARG POTS_VERSION=latest
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install Asterisk and minimal utilities (no openssh, dialog, expect, minicom, screen, passwd)
+# Install Asterisk and minimal utilities
 RUN apt-get update && apt-get install -y --no-install-recommends \
     asterisk \
     asterisk-modules \
@@ -30,9 +21,16 @@ RUN wget -O /usr/local/bin/iaxmodem \
         "https://github.com/gbm-dev/pots/releases/download/v0.1.0/iaxmodem" \
     && chmod +x /usr/local/bin/iaxmodem
 
-# Copy Go binaries
-COPY --from=builder /oob-hub /usr/local/bin/oob-hub
-COPY --from=builder /oob-manage /usr/local/bin/oob-manage
+# Install Go binaries from GitHub release
+RUN set -eux; \
+    if [ "$POTS_VERSION" = "latest" ]; then \
+        DL_URL="https://github.com/gbm-dev/pots/releases/latest/download"; \
+    else \
+        DL_URL="https://github.com/gbm-dev/pots/releases/download/${POTS_VERSION}"; \
+    fi; \
+    wget -O /usr/local/bin/oob-hub "${DL_URL}/oob-hub" \
+    && wget -O /usr/local/bin/oob-manage "${DL_URL}/oob-manage" \
+    && chmod +x /usr/local/bin/oob-hub /usr/local/bin/oob-manage
 
 # Create directories
 RUN mkdir -p /var/log/oob-sessions /etc/iaxmodem /var/log/iaxmodem
@@ -50,7 +48,7 @@ COPY config/iaxmodem/ /etc/iaxmodem-templates/
 # Copy site configuration
 COPY config/oob-sites.conf /etc/oob-sites.conf
 
-# Copy scripts (only startup/infra scripts, not TUI/user management)
+# Copy scripts (only startup/infra scripts)
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY scripts/setup-iaxmodem.sh /usr/local/bin/setup-iaxmodem.sh
 COPY scripts/oob-healthcheck.sh /usr/local/bin/oob-healthcheck.sh
@@ -65,7 +63,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh \
 # 10000-10100 - RTP media
 EXPOSE 2222/tcp 5060/udp 10000-10100/udp
 
-# Docker-level health check (every 30s, 10s timeout, 3 retries before unhealthy)
+# Docker-level health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD /usr/local/bin/oob-healthcheck.sh || exit 1
 
