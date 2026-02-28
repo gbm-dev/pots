@@ -137,8 +137,16 @@ fi
 
 # --- Start D-Modem (slmodemd + d-modem) ---
 echo "Starting D-Modem..."
+# d-modem reads SIP credentials from env vars
+if [[ -z "${TELNYX_SIP_USER:-}" || -z "${TELNYX_SIP_PASS:-}" ]]; then
+    echo "  ERROR: TELNYX_SIP_USER and TELNYX_SIP_PASS must be set for D-Modem"
+    exit 1
+fi
+export SIP_USER="${TELNYX_SIP_USER}"
+export SIP_PASS="${TELNYX_SIP_PASS}"
+export SIP_DOMAIN="${TELNYX_SIP_DOMAIN:-sip.telnyx.com}"
 # Limit file descriptors to 1024 to avoid FD_SETSIZE crash in 32-bit slmodemd
-sudo sh -c "ulimit -n 1024; \"$SLMODEMD_BIN\" -d9 -e \"$DMODEM_BIN\"" &
+sudo -E sh -c "ulimit -n 1024; \"$SLMODEMD_BIN\" -d9 -e \"$DMODEM_BIN\"" &
 PIDS+=($!)
 echo "  slmodemd PID: ${PIDS[-1]}"
 

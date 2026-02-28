@@ -46,6 +46,10 @@ chmod 1777 /var/log/oob-sessions
 DEVICE_PATH=${DEVICE_PATH:-/dev/ttySL0}
 
 echo "Starting D-Modem..."
+# d-modem reads SIP credentials from env vars
+export SIP_USER="${TELNYX_SIP_USER:-}"
+export SIP_PASS="${TELNYX_SIP_PASS:-}"
+export SIP_DOMAIN="${TELNYX_SIP_DOMAIN:-sip.telnyx.com}"
 # Limit file descriptors to 1024 to avoid FD_SETSIZE crash in 32-bit slmodemd
 sh -c "ulimit -n 1024; slmodemd -e /usr/local/bin/d-modem" &
 DMODEM_PID=$!
