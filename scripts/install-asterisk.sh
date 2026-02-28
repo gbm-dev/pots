@@ -68,7 +68,7 @@ contrib/scripts/install_prereq install
 
 # --- Configure (install to /usr so it replaces the apt paths) ---
 echo "Configuring Asterisk..."
-./configure --prefix=/usr --with-jansson-bundled 2>&1 | tail -5
+./configure --prefix=/usr --with-jansson-bundled --with-pjproject-bundled 2>&1 | tail -5
 
 # --- Build ---
 echo "Building Asterisk (this takes a few minutes)..."
