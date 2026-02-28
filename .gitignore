@@ -2,3 +2,5 @@
 logs/*
 !logs/.gitkeep
 PLAN.md
+third_party/dmodem/*
+!third_party/dmodem/.gitkeep

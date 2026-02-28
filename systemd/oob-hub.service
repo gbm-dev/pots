@@ -1,5 +1,5 @@
 [Unit]
-Description=OOB Console Hub (Asterisk + IAXmodem + Telnyx)
+Description=OOB Console Hub (D-Modem + Telnyx)
 Documentation=https://github.com/gbm-dev/pots
 After=docker.service network-online.target
 Requires=docker.service

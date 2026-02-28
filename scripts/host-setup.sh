@@ -189,8 +189,8 @@ table inet filter {
         # OOB SSH (container, for admins to reach the TUI menu)
         tcp dport ${OOB_SSH_PORT} ct state new accept
 
-        # SIP signaling (Telnyx)
-        udp dport 5060 accept
+        # SIP signaling (Telnyx, one local listener per modem instance)
+        udp dport 5060-5070 accept
 
         # RTP media range (Telnyx voice/modem)
         udp dport 10000-10100 accept
@@ -220,7 +220,7 @@ NFTEOF
 
 systemctl enable nftables
 nft -f /etc/nftables.conf
-echo "  nftables configured. Open ports: ${HOST_SSH_PORT}/tcp (host SSH), ${OOB_SSH_PORT}/tcp (OOB), 5060/udp (SIP), 10000-10100/udp (RTP)"
+echo "  nftables configured. Open ports: ${HOST_SSH_PORT}/tcp (host SSH), ${OOB_SSH_PORT}/tcp (OOB), 5060-5070/udp (SIP), 10000-10100/udp (RTP)"
 
 # --- 5. Clone and prepare OOB hub ---
 echo "[5/6] Setting up OOB Console Hub..."
@@ -310,5 +310,5 @@ echo "     journalctl -u oob-watchdog -f          # watchdog logs"
 echo "     docker exec oob-console-hub oob-healthcheck.sh --verbose  # manual health check"
 echo "     docker exec oob-console-hub oob-manage list              # list users directly"
 echo ""
-echo "  Firewall: host SSH(:${HOST_SSH_PORT}), OOB(:${OOB_SSH_PORT}), SIP(:5060/udp), RTP(:10000-10100/udp)"
+echo "  Firewall: host SSH(:${HOST_SSH_PORT}), OOB(:${OOB_SSH_PORT}), SIP(:5060-5070/udp), RTP(:10000-10100/udp)"
 echo ""

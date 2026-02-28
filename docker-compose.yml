@@ -3,6 +3,10 @@ services:
     build:
       context: .
       network: host
+      args:
+        DMODEM_SOURCE: ${DMODEM_SOURCE:-build}
+        DMODEM_REF: ${DMODEM_REF:-59cacd766de7e093c9ef2109f146f417f2b6a945}
+        DMODEM_MAKE_FLAGS: ${DMODEM_MAKE_FLAGS:-NO_PULSE=1}
     container_name: oob-console-hub
     restart: unless-stopped
     env_file:

@@ -1,7 +1,13 @@
-FROM ubuntu:24.04 AS dmodem-builder
+ARG DMODEM_SOURCE=build
+
+FROM scratch AS dmodem-prebuilt
+COPY third_party/dmodem/ /tmp/dmodem-prebuilt/
+
+FROM ubuntu:24.04 AS dmodem-build
 
 ENV DEBIAN_FRONTEND=noninteractive
 ARG DMODEM_REF=59cacd766de7e093c9ef2109f146f417f2b6a945
+ARG DMODEM_MAKE_FLAGS=NO_PULSE=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -18,7 +24,12 @@ RUN git clone https://git.jerryxiao.cc/Jerry/D-Modem /tmp/dmodem \
     && cd /tmp/dmodem \
     && git checkout "${DMODEM_REF}" \
     && git submodule update --init --recursive \
-    && make NO_PULSE=1
+    && make ${DMODEM_MAKE_FLAGS} \
+    && mkdir -p /tmp/dmodem-prebuilt \
+    && cp /tmp/dmodem/slmodemd/slmodemd /tmp/dmodem-prebuilt/slmodemd \
+    && cp /tmp/dmodem/d-modem /tmp/dmodem-prebuilt/d-modem
+
+FROM dmodem-${DMODEM_SOURCE} AS dmodem-artifacts
 
 FROM golang:1.25 AS go-builder
 
@@ -37,52 +48,30 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install Asterisk and minimal utilities
+# Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    asterisk \
-    asterisk-modules \
-    asterisk-core-sounds-en-gsm \
     psmisc \
     procps \
     ca-certificates \
-    wget \
-    libtiff6 \
     libc6-i386 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install prebuilt iaxmodem binary from GitHub release
-RUN wget -O /usr/local/bin/iaxmodem \
-        "https://github.com/gbm-dev/pots/releases/download/v0.1.0/iaxmodem" \
-    && chmod +x /usr/local/bin/iaxmodem
-
 # Install D-Modem binaries built in the previous stage.
-COPY --from=dmodem-builder /tmp/dmodem/slmodemd/slmodemd /usr/local/bin/slmodemd
-COPY --from=dmodem-builder /tmp/dmodem/d-modem /usr/local/bin/d-modem
+COPY --from=dmodem-artifacts /tmp/dmodem-prebuilt/slmodemd /usr/local/bin/slmodemd
+COPY --from=dmodem-artifacts /tmp/dmodem-prebuilt/d-modem /usr/local/bin/d-modem
 
 # Create directories
-RUN mkdir -p /var/log/oob-sessions /etc/iaxmodem /var/log/iaxmodem /var/log/dmodem
-
-# Copy Asterisk configuration
-COPY config/asterisk/pjsip.conf /etc/asterisk/pjsip.conf
-COPY config/asterisk/pjsip_wizard.conf /etc/asterisk/pjsip_wizard.conf
-COPY config/asterisk/extensions.conf /etc/asterisk/extensions.conf
-COPY config/asterisk/iax.conf /etc/asterisk/iax.conf
-COPY config/asterisk/modules.conf /etc/asterisk/modules.conf
-
-# Copy IAXmodem template
-COPY config/iaxmodem/ /etc/iaxmodem-templates/
+RUN mkdir -p /var/log/oob-sessions /var/log/dmodem
 
 # Copy site configuration
 COPY config/oob-sites.conf /etc/oob-sites.conf
 
 # Copy scripts (only startup/infra scripts)
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY scripts/setup-iaxmodem.sh /usr/local/bin/setup-iaxmodem.sh
 COPY scripts/start-dmodem.sh /usr/local/bin/start-dmodem.sh
 COPY scripts/oob-healthcheck.sh /usr/local/bin/oob-healthcheck.sh
 
 RUN chmod +x /usr/local/bin/entrypoint.sh \
-             /usr/local/bin/setup-iaxmodem.sh \
              /usr/local/bin/start-dmodem.sh \
              /usr/local/bin/oob-healthcheck.sh
 
@@ -92,9 +81,9 @@ COPY --from=go-builder /out/oob-manage /usr/local/bin/oob-manage
 
 # Expose ports
 # 2222 - SSH (Go TUI)
-# 5060 - SIP (UDP)
+# 5060-5070 - SIP (UDP, one listener per modem instance)
 # 10000-10100 - RTP media
-EXPOSE 2222/tcp 5060/udp 10000-10100/udp
+EXPOSE 2222/tcp 5060-5070/udp 10000-10100/udp
 
 # Docker-level health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \

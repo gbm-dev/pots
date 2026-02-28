@@ -12,7 +12,6 @@
 VERBOSE=false
 [[ "${1:-}" == "--verbose" ]] && VERBOSE=true
 
-MODEM_BACKEND=${MODEM_BACKEND:-dmodem}
 MODEM_COUNT=${MODEM_COUNT:-8}
 MODEM_DEVICE_PREFIX=${MODEM_DEVICE_PREFIX:-/dev/ttyIAX}
 
@@ -46,14 +45,9 @@ check "oob-hub running" critical \
 check "SSH listening on 2222" critical \
     bash -c 'echo | timeout 5 bash -c "cat < /dev/tcp/127.0.0.1/2222" 2>/dev/null; [[ $? -ne 1 ]]'
 
-# 3. Backend process running
-if [[ "${MODEM_BACKEND}" == "iaxmodem" ]]; then
-    check "Asterisk running" critical \
-        asterisk -rx "core show version"
-else
-    check "slmodemd running" critical \
-        pgrep -x slmodemd
-fi
+# 3. D-Modem backend process running
+check "slmodemd running" critical \
+    pgrep -x slmodemd
 
 # 4. At least one modem device exists
 check "Modem devices present" critical \
@@ -61,15 +55,9 @@ check "Modem devices present" critical \
 
 # --- Warning checks (alert but don't restart) ---
 
-# 5. Telnyx SIP trunk registered (Asterisk backend only)
-if [[ "${MODEM_BACKEND}" == "iaxmodem" ]]; then
-    check "Telnyx trunk registered" warning \
-        bash -c 'asterisk -rx "pjsip show registrations" 2>/dev/null | grep -qi "registered"'
-else
-    # dmodem handles SIP itself; ensure modem application processes exist.
-    check "d-modem process(es) running" warning \
-        bash -c 'pgrep -f "/usr/local/bin/d-modem" >/dev/null 2>&1'
-fi
+# 5. Ensure modem application processes exist.
+check "d-modem process(es) running" warning \
+    bash -c 'pgrep -f "/usr/local/bin/d-modem" >/dev/null 2>&1'
 
 # 6. All expected modem devices present
 check "All ${MODEM_COUNT} modem devices present" warning \
