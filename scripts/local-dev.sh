@@ -67,7 +67,7 @@ if [[ "${1:-}" == "ast" ]]; then
 fi
 
 # --- Verify binaries exist (Download if missing) ---
-DMODEM_VERSION="v0.1.4"
+DMODEM_VERSION="v0.1.5"
 DMODEM_BASE_URL="https://github.com/gbm-dev/D-Modem/releases/download/${DMODEM_VERSION}"
 
 mkdir -p "${PROJECT_DIR}/bin"
@@ -146,6 +146,7 @@ fi
 export SIP_USER="${TELNYX_SIP_USER}"
 export SIP_PASS="${TELNYX_SIP_PASS}"
 export SIP_DOMAIN="${TELNYX_SIP_DOMAIN:-sip.telnyx.com}"
+export SIP_PORT="${SIP_PORT:-5062}"
 # Copy binaries to /tmp so they're accessible after slmodemd drops privileges to nobody
 SLMODEMD_RUN="/tmp/slmodemd.$$"
 DMODEM_RUN="/tmp/d-modem.$$"
