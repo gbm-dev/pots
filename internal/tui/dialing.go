@@ -10,7 +10,10 @@ import (
 	"github.com/gbm-dev/pots/internal/modem"
 )
 
-const dialTimeout = 60 * time.Second
+// Keep this slightly above Asterisk's Dial() timeout (120s in extensions.conf)
+// so we can receive final modem result codes like NO CARRIER instead of a
+// premature local TIMEOUT.
+const dialTimeout = 125 * time.Second
 const resetTimeout = 5 * time.Second
 
 // DialingModel shows connection progress with a spinner.
