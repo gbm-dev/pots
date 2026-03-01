@@ -71,23 +71,34 @@ done
 
 # --- Start Asterisk ---
 echo "Starting Asterisk..."
-# Capture output to a temp file for diagnosis if it fails
-AST_STARTUP_LOG=$(mktemp)
-asterisk -f >"$AST_STARTUP_LOG" 2>&1 &
+# Clear old database if it exists to prevent Stasis init failure
+rm -f /var/lib/asterisk/astdb.sqlite3 || true
+
+# Start Asterisk with explicit config path and high verbosity
+# Use -c for console mode, -f to keep in foreground, -vvv for verbosity
+asterisk -f -C /etc/asterisk/asterisk.conf -vvv >/var/log/asterisk/startup.log 2>&1 &
 ASTERISK_PID=$!
 
 # Wait for Asterisk to be ready
-sleep 5
-if kill -0 $ASTERISK_PID 2>/dev/null; then
-    echo "Asterisk running (PID ${ASTERISK_PID})."
-else
-    echo "ERROR: Asterisk failed to start!"
-    echo "--- Asterisk Startup Output ---"
-    cat "$AST_STARTUP_LOG"
-    echo "-------------------------------"
-    exit 1
-fi
-rm -f "$AST_STARTUP_LOG"
+echo "  Waiting for Asterisk to initialize..."
+for i in $(seq 1 10); do
+    if kill -0 $ASTERISK_PID 2>/dev/null; then
+        if asterisk -rx "core show version" &>/dev/null; then
+            echo "  Asterisk initialized successfully."
+            break
+        fi
+    else
+        echo "ERROR: Asterisk process died during startup!"
+        echo "--- Last 50 lines of startup.log ---"
+        tail -n 50 /var/log/asterisk/startup.log
+        echo "------------------------------------"
+        exit 1
+    fi
+    sleep 1
+    if [ "$i" -eq 10 ]; then
+        echo "WARNING: Asterisk process still starting after 10s..."
+    fi
+done
 
 # --- Start Go SSH server (replaces sshd) ---
 echo "=== OOB Console Hub Ready ==="
