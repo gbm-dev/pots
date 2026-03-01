@@ -91,12 +91,13 @@ RUN wget -q "http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-22-cu
     && make install \
     && cd .. && rm -rf asterisk-22.*/
 
-# Install prebuilt slmodemd/d-modem binaries
-ARG DMODEM_VERSION=v0.1.6
+# Install prebuilt slmodemd/d-modem binaries (latest release)
+# ADD checksums the API response; cache busts when a new release is published.
+ADD https://api.github.com/repos/gbm-dev/D-Modem/releases/latest /tmp/dmodem-release.json
 RUN wget -O /usr/local/bin/slmodemd \
-        "https://github.com/gbm-dev/D-Modem/releases/download/${DMODEM_VERSION}/slmodemd" \
+        "https://github.com/gbm-dev/D-Modem/releases/latest/download/slmodemd" \
     && wget -O /usr/local/bin/d-modem \
-        "https://github.com/gbm-dev/D-Modem/releases/download/${DMODEM_VERSION}/d-modem" \
+        "https://github.com/gbm-dev/D-Modem/releases/latest/download/d-modem" \
     && chmod +x /usr/local/bin/slmodemd /usr/local/bin/d-modem
 
 # Copy Go binaries from builder
