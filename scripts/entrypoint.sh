@@ -71,17 +71,23 @@ done
 
 # --- Start Asterisk ---
 echo "Starting Asterisk..."
-asterisk -f &
+# Capture output to a temp file for diagnosis if it fails
+AST_STARTUP_LOG=$(mktemp)
+asterisk -f >"$AST_STARTUP_LOG" 2>&1 &
 ASTERISK_PID=$!
 
 # Wait for Asterisk to be ready
-sleep 3
+sleep 5
 if kill -0 $ASTERISK_PID 2>/dev/null; then
     echo "Asterisk running (PID ${ASTERISK_PID})."
 else
     echo "ERROR: Asterisk failed to start!"
+    echo "--- Asterisk Startup Output ---"
+    cat "$AST_STARTUP_LOG"
+    echo "-------------------------------"
     exit 1
 fi
+rm -f "$AST_STARTUP_LOG"
 
 # --- Start Go SSH server (replaces sshd) ---
 echo "=== OOB Console Hub Ready ==="
