@@ -23,6 +23,7 @@ RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-in
     libjansson-dev \
     libedit-dev \
     libcurl4-openssl-dev \
+    libxslt1-dev \
     ca-certificates \
     psmisc \
     procps \
