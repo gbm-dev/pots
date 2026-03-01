@@ -18,6 +18,9 @@ type TerminalSession struct {
 	lock     *modem.DeviceLock
 	logger   *session.Logger
 	logDir   string
+
+	stdin  io.Reader // set by tea.Exec via SetStdin
+	stdout io.Writer // set by tea.Exec via SetStdout
 }
 
 // NewTerminalSession creates a terminal pass-through session.
@@ -43,9 +46,19 @@ func (t *TerminalSession) Run() error {
 
 	rwc := t.modem.ReadWriteCloser()
 
+	// Use the I/O provided by tea.Exec (SSH channel), fall back to os std.
+	stdin := t.stdin
+	stdout := t.stdout
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+
 	// Print connection banner
 	banner := fmt.Sprintf("\r\n*** CONNECTED to %s — Press Enter then ~. to disconnect ***\r\n\r\n", t.siteName)
-	os.Stdout.WriteString(banner)
+	fmt.Fprint(stdout, banner)
 
 	// Modem→user: tee to logger
 	loggedReader := t.logger.TeeReader(rwc)
@@ -54,26 +67,26 @@ func (t *TerminalSession) Run() error {
 
 	// Modem → user
 	go func() {
-		_, err := io.Copy(os.Stdout, loggedReader)
+		_, err := io.Copy(stdout, loggedReader)
 		done <- err
 	}()
 
 	// User → modem (with ~. escape detection)
 	go func() {
-		done <- t.userToModem(os.Stdin, rwc)
+		done <- t.userToModem(stdin, rwc)
 	}()
 
 	// Wait for either direction to finish
 	return <-done
 }
 
-// SetStdin is required by tea.ExecCommand but we manage stdin ourselves.
-func (t *TerminalSession) SetStdin(r io.Reader) {}
+// SetStdin stores the SSH session's stdin for use in Run().
+func (t *TerminalSession) SetStdin(r io.Reader) { t.stdin = r }
 
-// SetStdout is required by tea.ExecCommand but we manage stdout ourselves.
-func (t *TerminalSession) SetStdout(w io.Writer) {}
+// SetStdout stores the SSH session's stdout for use in Run().
+func (t *TerminalSession) SetStdout(w io.Writer) { t.stdout = w }
 
-// SetStderr is required by tea.ExecCommand but we manage stderr ourselves.
+// SetStderr is required by tea.ExecCommand.
 func (t *TerminalSession) SetStderr(w io.Writer) {}
 
 // userToModem reads from user and writes to modem, detecting ~. escape.
