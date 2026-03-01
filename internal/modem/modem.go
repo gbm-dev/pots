@@ -73,6 +73,19 @@ func (m *Modem) Init(timeout time.Duration) error {
 	// Drain any stale data in the buffer
 	m.drain()
 
+	// Force command mode: if modem is stuck in online/data mode after a
+	// failed dial, the +++ escape sequence returns it to command mode.
+	slog.Debug("modem init: sending escape sequence", "device", m.path)
+	time.Sleep(1100 * time.Millisecond)
+	m.dev.Write([]byte("+++"))
+	time.Sleep(1100 * time.Millisecond)
+	m.drain()
+
+	// Send ATH to hang up any lingering connection
+	m.dev.Write([]byte("ATH\r"))
+	m.readUntil(2*time.Second, "OK", "ERROR", "NO CARRIER")
+	m.drain()
+
 	// Reset modem first. ATZ can restore default settings.
 	resp, err := m.runAT("ATZ", timeout, "OK", "ERROR")
 	if err != nil {

@@ -3,7 +3,10 @@ package tui
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
+	"sync/atomic"
+	"time"
 
 	"github.com/gbm-dev/pots/internal/modem"
 	"github.com/gbm-dev/pots/internal/session"
@@ -60,20 +63,58 @@ func (t *TerminalSession) Run() error {
 	banner := fmt.Sprintf("\r\n*** CONNECTED to %s — Press Enter then ~. to disconnect ***\r\n\r\n", t.siteName)
 	fmt.Fprint(stdout, banner)
 
-	// Modem→user: tee to logger
+	// Modem→user: tee to logger, track when we first receive data
 	loggedReader := t.logger.TeeReader(rwc)
+	var gotData atomic.Bool
 
 	done := make(chan error, 2)
 
 	// Modem → user
 	go func() {
-		_, err := io.Copy(stdout, loggedReader)
-		done <- err
+		buf := make([]byte, 1024)
+		for {
+			n, err := loggedReader.Read(buf)
+			if n > 0 {
+				gotData.Store(true)
+				if _, werr := stdout.Write(buf[:n]); werr != nil {
+					done <- werr
+					return
+				}
+			}
+			if err != nil {
+				done <- err
+				return
+			}
+		}
 	}()
 
 	// User → modem (with ~. escape detection)
 	go func() {
 		done <- t.userToModem(stdin, rwc)
+	}()
+
+	// Send Enter every 2s until remote responds, then stop.
+	// Keeps modem carrier alive and wakes the remote terminal.
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		// Send first Enter immediately
+		if _, err := rwc.Write([]byte("\r")); err != nil {
+			slog.Debug("wake: initial enter failed", "err", err)
+			return
+		}
+		slog.Debug("wake: sent initial enter")
+		for range ticker.C {
+			if gotData.Load() {
+				slog.Debug("wake: got data from remote, stopping")
+				return
+			}
+			if _, err := rwc.Write([]byte("\r")); err != nil {
+				slog.Debug("wake: enter failed", "err", err)
+				return
+			}
+			slog.Debug("wake: sent enter")
+		}
 	}()
 
 	// Wait for either direction to finish

@@ -160,12 +160,14 @@ func (m DialingModel) acquireAndDial() tea.Cmd {
 		// Step 5: Dial
 		resp, err := mdm.Dial(m.site.Phone, dialTimeout)
 		if err != nil {
+			mdm.Hangup()
 			mdm.Close()
 			m.lock.Release()
 			return ErrorMsg{Err: fmt.Errorf("dial error: %w", err), Context: "dial"}
 		}
 
 		if resp.Result != modem.ResultConnect {
+			mdm.Hangup()
 			mdm.Close()
 			m.lock.Release()
 		}
