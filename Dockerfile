@@ -39,7 +39,7 @@ RUN wget -q "http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-22-cu
     && rm asterisk-22-current.tar.gz \
     && cd asterisk-22.*/ \
     && (yes | DEBIAN_FRONTEND=noninteractive ./contrib/scripts/install_prereq install || true) \
-    && ./configure --prefix=/usr --with-jansson-bundled --with-pjproject-bundled 2>&1 | tail -5 \
+    && ./configure --prefix=/usr --with-jansson-bundled --with-pjproject-bundled --with-libcurl --with-libxml2 2>&1 | tail -5 \
     && make menuselect.makeopts \
     && ./menuselect/menuselect --disable-all menuselect.makeopts \
     && ./menuselect/menuselect \
