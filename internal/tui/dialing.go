@@ -26,20 +26,20 @@ type DialingModel struct {
 	showDebug  bool
 	err        error
 	done       bool
-	pool       *modem.Pool
+	lock       *modem.DeviceLock
 	theme      Theme
 }
 
 // NewDialingModel creates a dialing view for the given site.
-func NewDialingModel(site config.Site, pool *modem.Pool, theme Theme) DialingModel {
+func NewDialingModel(site config.Site, lock *modem.DeviceLock, theme Theme) DialingModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = theme.WarningStyle
 	return DialingModel{
 		spinner: s,
 		site:    site,
-		status:  "Acquiring modem port...",
-		pool:    pool,
+		status:  "Acquiring modem...",
+		lock:    lock,
 		theme:   theme,
 	}
 }
@@ -124,41 +124,50 @@ func (m DialingModel) deviceDisplay() string {
 	return m.device
 }
 
-// acquireAndDial runs the modem acquire → reset → dial sequence,
+// acquireAndDial runs the modem acquire → reset → configure → dial sequence,
 // sending status updates back to the TUI at each step.
 func (m DialingModel) acquireAndDial() tea.Cmd {
 	return func() tea.Msg {
-		// Step 1: Acquire port
-		dev, err := m.pool.Acquire(m.site.Name)
+		// Step 1: Acquire device
+		dev, err := m.lock.Acquire(m.site.Name)
 		if err != nil {
-			return ErrorMsg{Err: fmt.Errorf("no free modem ports available"), Context: "acquire"}
+			return ErrorMsg{Err: fmt.Errorf("modem busy: %w", err), Context: "acquire"}
 		}
 
 		// Step 2: Open device
 		mdm, err := modem.Open(dev)
 		if err != nil {
-			m.pool.Release(dev)
+			m.lock.Release()
 			return ErrorMsg{Err: fmt.Errorf("failed to open %s: %w", dev, err), Context: "open"}
 		}
 
 		// Step 3: Initialize modem (ATE0 + ATZ)
 		if err := mdm.Init(resetTimeout); err != nil {
 			mdm.Close()
-			m.pool.Release(dev)
+			m.lock.Release()
 			return ErrorMsg{Err: fmt.Errorf("modem init failed: %w", err), Context: "init"}
 		}
 
-		// Step 4: Dial
+		// Step 4: Send pre-dial configuration commands if any
+		if len(m.site.ModemInit) > 0 {
+			if err := mdm.Configure(m.site.ModemInit, resetTimeout); err != nil {
+				mdm.Close()
+				m.lock.Release()
+				return ErrorMsg{Err: fmt.Errorf("modem configure failed: %w", err), Context: "configure"}
+			}
+		}
+
+		// Step 5: Dial
 		resp, err := mdm.Dial(m.site.Phone, dialTimeout)
 		if err != nil {
 			mdm.Close()
-			m.pool.Release(dev)
+			m.lock.Release()
 			return ErrorMsg{Err: fmt.Errorf("dial error: %w", err), Context: "dial"}
 		}
 
 		if resp.Result != modem.ResultConnect {
 			mdm.Close()
-			m.pool.Release(dev)
+			m.lock.Release()
 		}
 
 		return DialResultMsg{Result: resp.Result, Transcript: resp.Transcript, Modem: mdm, Device: dev}

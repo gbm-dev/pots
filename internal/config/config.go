@@ -7,23 +7,25 @@ import (
 
 // AppConfig holds application configuration loaded from environment variables.
 type AppConfig struct {
-	SSHPort    int
-	ModemCount int
-	SitesPath  string
+	SSHAddress  string
+	SSHPort     int
+	DevicePath  string
+	SitesPath   string
 	UserDataDir string
-	LogDir     string
-	HostKeyDir string
+	LogDir      string
+	HostKeyDir  string
 }
 
 // LoadFromEnv loads configuration from environment variables with defaults.
 func LoadFromEnv() AppConfig {
 	return AppConfig{
-		SSHPort:    envInt("SSH_PORT", 2222),
-		ModemCount: envInt("MODEM_COUNT", 8),
-		SitesPath:  envStr("SITES_PATH", "/etc/oob-sites.conf"),
+		SSHAddress:  envStr("SSH_ADDRESS", ""),
+		SSHPort:     envInt("SSH_PORT", 2222),
+		DevicePath:  envStr("DEVICE_PATH", "/dev/ttySL0"),
+		SitesPath:   envStr("SITES_PATH", "/etc/oob-sites.conf"),
 		UserDataDir: envStr("USER_DATA_DIR", "/data/users"),
-		LogDir:     envStr("LOG_DIR", "/var/log/oob-sessions"),
-		HostKeyDir: envStr("HOST_KEY_DIR", "/data/users/ssh_host_keys"),
+		LogDir:      envStr("LOG_DIR", "/var/log/oob-sessions"),
+		HostKeyDir:  envStr("HOST_KEY_DIR", "/data/users/ssh_host_keys"),
 	}
 }
 

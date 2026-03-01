@@ -1,128 +1,99 @@
 package modem
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-func testPool(t *testing.T, count int) (*Pool, []string) {
+func testDeviceLock(t *testing.T) (*DeviceLock, string) {
 	t.Helper()
 	dir := t.TempDir()
-	devices := make(map[string]string)
-	var paths []string
-	for i := 0; i < count; i++ {
-		path := filepath.Join(dir, "ttyIAX")
-		// Each needs a unique name
-		path = filepath.Join(dir, fmt.Sprintf("ttyIAX%d", i))
-		f, err := os.Create(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		f.Close()
-		devices[path] = ""
-		paths = append(paths, path)
+	path := filepath.Join(dir, "ttySL0")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return &Pool{devices: devices}, paths
+	f.Close()
+	return NewDeviceLock(path), path
 }
 
-func TestPoolAcquireRelease(t *testing.T) {
-	p, _ := testPool(t, 2)
+func TestDeviceLockAcquireRelease(t *testing.T) {
+	dl, devPath := testDeviceLock(t)
 
-	dev1, err := p.Acquire("site-a")
+	dev, err := dl.Acquire("site-a")
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
-	if dev1 == "" {
-		t.Fatal("expected non-empty device")
+	if dev != devPath {
+		t.Errorf("expected %q, got %q", devPath, dev)
 	}
 
-	dev2, err := p.Acquire("site-b")
-	if err != nil {
-		t.Fatalf("Acquire second: %v", err)
-	}
-	if dev2 == dev1 {
-		t.Error("expected different device")
-	}
-
-	// All in use
-	_, err = p.Acquire("site-c")
+	// Should be busy now
+	_, err = dl.Acquire("site-b")
 	if err == nil {
-		t.Error("expected error when all devices in use")
+		t.Error("expected error when modem is busy")
 	}
 
-	// Release one
-	p.Release(dev1)
-	dev3, err := p.Acquire("site-a")
+	// Release and re-acquire
+	dl.Release()
+	dev, err = dl.Acquire("site-b")
 	if err != nil {
 		t.Fatalf("Acquire after release: %v", err)
 	}
-	if dev3 != dev1 {
-		t.Errorf("expected released device %q, got %q", dev1, dev3)
+	if dev != devPath {
+		t.Errorf("expected %q, got %q", devPath, dev)
 	}
 }
 
-func TestPoolAcquireRemovesMissing(t *testing.T) {
-	dir := t.TempDir()
-	missingPath := filepath.Join(dir, "ttyGONE")
-	realPath := filepath.Join(dir, "ttyREAL")
-	os.Create(realPath)
+func TestDeviceLockMissingDevice(t *testing.T) {
+	dl := NewDeviceLock("/dev/nonexistent-test-device")
 
-	p := &Pool{devices: map[string]string{
-		missingPath: "",
-		realPath:    "",
-	}}
-
-	dev, err := p.Acquire("test")
-	if err != nil {
-		t.Fatalf("Acquire: %v", err)
-	}
-	if dev != realPath {
-		t.Errorf("expected %q, got %q", realPath, dev)
-	}
-
-	// Missing device should have been pruned during Acquire
-	// Try to acquire again — only the one we got should be in pool (and it's in use)
-	_, err = p.Acquire("test2")
+	_, err := dl.Acquire("test")
 	if err == nil {
-		t.Error("expected error — missing device should be pruned and real one is in use")
+		t.Error("expected error for missing device")
 	}
 }
 
-func TestPoolAvailable(t *testing.T) {
-	p, paths := testPool(t, 3)
-	// Mark one as in-use
-	p.devices[paths[2]] = "some-site"
+func TestDeviceLockActiveSite(t *testing.T) {
+	dl, _ := testDeviceLock(t)
 
-	free, total := p.Available()
-	if total != 3 {
-		t.Errorf("total = %d, want 3", total)
+	if site := dl.ActiveSite(); site != "" {
+		t.Errorf("expected empty active site, got %q", site)
 	}
-	if free != 2 {
-		t.Errorf("free = %d, want 2", free)
-	}
-}
 
-func TestPoolActiveSites(t *testing.T) {
-	p, paths := testPool(t, 3)
-	p.devices[paths[0]] = "site-a"
-	p.devices[paths[2]] = "site-b"
-
-	active := p.ActiveSites()
-	if len(active) != 2 {
-		t.Errorf("expected 2 active sites, got %d", len(active))
+	dl.Acquire("site-a")
+	if site := dl.ActiveSite(); site != "site-a" {
+		t.Errorf("expected %q, got %q", "site-a", site)
 	}
-	if !active["site-a"] || !active["site-b"] {
-		t.Errorf("unexpected active sites: %v", active)
+
+	dl.Release()
+	if site := dl.ActiveSite(); site != "" {
+		t.Errorf("expected empty after release, got %q", site)
 	}
 }
 
-func TestNewPoolWithRealFiles(t *testing.T) {
-	// NewPool checks /dev/ttyIAX* which won't exist in tests
-	p := NewPool(4)
-	_, total := p.Available()
-	if total != 0 {
-		t.Logf("found %d real devices (expected on dev machine)", total)
+func TestDeviceLockIsAvailable(t *testing.T) {
+	dl, _ := testDeviceLock(t)
+
+	if !dl.IsAvailable() {
+		t.Error("expected available when idle")
+	}
+
+	dl.Acquire("site-a")
+	if dl.IsAvailable() {
+		t.Error("expected not available when busy")
+	}
+
+	dl.Release()
+	if !dl.IsAvailable() {
+		t.Error("expected available after release")
+	}
+}
+
+func TestDeviceLockDevicePath(t *testing.T) {
+	dl := NewDeviceLock("/dev/ttySL0")
+	if dl.DevicePath() != "/dev/ttySL0" {
+		t.Errorf("expected /dev/ttySL0, got %q", dl.DevicePath())
 	}
 }

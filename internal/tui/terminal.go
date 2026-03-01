@@ -15,18 +15,18 @@ type TerminalSession struct {
 	modem    *modem.Modem
 	device   string
 	siteName string
-	pool     *modem.Pool
+	lock     *modem.DeviceLock
 	logger   *session.Logger
 	logDir   string
 }
 
 // NewTerminalSession creates a terminal pass-through session.
-func NewTerminalSession(mdm *modem.Modem, device, siteName, logDir string, pool *modem.Pool) *TerminalSession {
+func NewTerminalSession(mdm *modem.Modem, device, siteName, logDir string, lock *modem.DeviceLock) *TerminalSession {
 	return &TerminalSession{
 		modem:    mdm,
 		device:   device,
 		siteName: siteName,
-		pool:     pool,
+		lock:     lock,
 		logDir:   logDir,
 	}
 }
@@ -123,5 +123,5 @@ func (t *TerminalSession) cleanup() {
 	}
 	t.modem.Hangup()
 	t.modem.Close()
-	t.pool.Release(t.device)
+	t.lock.Release()
 }

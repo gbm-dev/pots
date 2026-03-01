@@ -6,76 +6,59 @@ import (
 	"sync"
 )
 
-// Pool manages a set of IAXmodem PTY devices.
-type Pool struct {
-	mu      sync.Mutex
-	devices map[string]string // device path → site name ("" = free)
+// DeviceLock manages a single modem device (e.g. /dev/ttySL0).
+// Only one session can hold the device at a time.
+type DeviceLock struct {
+	mu         sync.Mutex
+	devicePath string
+	activeSite string // "" = idle
 }
 
-// NewPool creates a pool with modemCount devices (/dev/ttyIAX0 through ttyIAX{n-1}).
-// Only devices that exist on the filesystem are added to the pool.
-func NewPool(modemCount int) *Pool {
-	devices := make(map[string]string)
-	for i := 0; i < modemCount; i++ {
-		dev := fmt.Sprintf("/dev/ttyIAX%d", i)
-		if _, err := os.Stat(dev); err == nil {
-			devices[dev] = ""
-		}
+// NewDeviceLock creates a lock for the given modem device path.
+func NewDeviceLock(devicePath string) *DeviceLock {
+	return &DeviceLock{devicePath: devicePath}
+}
+
+// Acquire claims the modem device for the given site.
+// Returns the device path if available, or an error if busy or missing.
+func (d *DeviceLock) Acquire(siteName string) (string, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.activeSite != "" {
+		return "", fmt.Errorf("modem busy: connected to %s", d.activeSite)
 	}
-	return &Pool{devices: devices}
-}
 
-// Acquire returns the first available device that exists on the filesystem,
-// or an error if none are free.
-func (p *Pool) Acquire(siteName string) (string, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	for dev, site := range p.devices {
-		if site == "" {
-			// Verify device still exists before handing it out
-			if _, err := os.Stat(dev); err != nil {
-				delete(p.devices, dev)
-				continue
-			}
-			p.devices[dev] = siteName
-			return dev, nil
-		}
+	if _, err := os.Stat(d.devicePath); err != nil {
+		return "", fmt.Errorf("modem device %s not found: %w", d.devicePath, err)
 	}
-	return "", fmt.Errorf("no free modem devices")
+
+	d.activeSite = siteName
+	return d.devicePath, nil
 }
 
-// Release returns a device to the pool.
-func (p *Pool) Release(dev string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.devices[dev] = ""
+// Release marks the modem device as idle.
+func (d *DeviceLock) Release() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.activeSite = ""
 }
 
-// Available returns the count of free and total devices.
-func (p *Pool) Available() (free, total int) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	total = len(p.devices)
-	for _, site := range p.devices {
-		if site == "" {
-			free++
-		}
-	}
-	return
+// ActiveSite returns the name of the currently connected site, or "" if idle.
+func (d *DeviceLock) ActiveSite() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.activeSite
 }
 
-// ActiveSites returns the set of site names currently connected.
-func (p *Pool) ActiveSites() map[string]bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+// IsAvailable returns true if the modem device is not in use.
+func (d *DeviceLock) IsAvailable() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.activeSite == ""
+}
 
-	active := make(map[string]bool)
-	for _, site := range p.devices {
-		if site != "" {
-			active[site] = true
-		}
-	}
-	return active
+// DevicePath returns the configured device path.
+func (d *DeviceLock) DevicePath() string {
+	return d.devicePath
 }

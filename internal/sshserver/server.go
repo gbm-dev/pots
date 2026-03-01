@@ -3,7 +3,7 @@ package sshserver
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -21,16 +21,16 @@ import (
 type Server struct {
 	srv    *ssh.Server
 	store  auth.UserStore
-	pool   *modem.Pool
+	lock   *modem.DeviceLock
 	sites  []config.Site
 	logDir string
 }
 
 // New creates a new SSH server.
-func New(cfg config.AppConfig, store auth.UserStore, pool *modem.Pool, sites []config.Site) (*Server, error) {
+func New(cfg config.AppConfig, store auth.UserStore, lock *modem.DeviceLock, sites []config.Site) (*Server, error) {
 	s := &Server{
 		store:  store,
-		pool:   pool,
+		lock:   lock,
 		sites:  sites,
 		logDir: cfg.LogDir,
 	}
@@ -43,7 +43,7 @@ func New(cfg config.AppConfig, store auth.UserStore, pool *modem.Pool, sites []c
 	hostKeyPath := filepath.Join(cfg.HostKeyDir, "ssh_host_ed25519_key")
 
 	srv, err := wish.NewServer(
-		wish.WithAddress(fmt.Sprintf(":%d", cfg.SSHPort)),
+		wish.WithAddress(fmt.Sprintf("%s:%d", cfg.SSHAddress, cfg.SSHPort)),
 		wish.WithHostKeyPath(hostKeyPath),
 		wish.WithPasswordAuth(s.passwordAuth),
 		wish.WithMiddleware(
@@ -60,7 +60,7 @@ func New(cfg config.AppConfig, store auth.UserStore, pool *modem.Pool, sites []c
 
 // ListenAndServe starts the SSH server.
 func (s *Server) ListenAndServe() error {
-	log.Printf("SSH server listening on %s", s.srv.Addr)
+	slog.Info("SSH server listening", "addr", s.srv.Addr)
 	return s.srv.ListenAndServe()
 }
 
@@ -74,12 +74,12 @@ func (s *Server) passwordAuth(ctx ssh.Context, password string) bool {
 	username := ctx.User()
 	ok, err := s.store.Authenticate(username, password)
 	if err != nil {
-		log.Printf("auth error for %q: %v", username, err)
+		slog.Error("auth error", "user", username, "err", err)
 		return false
 	}
 	if ok {
 		s.store.UpdateLastLogin(username)
-		log.Printf("user %q authenticated from %s", username, ctx.RemoteAddr())
+		slog.Info("user authenticated", "user", username, "remote", ctx.RemoteAddr())
 	}
 	return ok
 }
@@ -90,12 +90,12 @@ func (s *Server) teaHandler(sshSession ssh.Session) (tea.Model, []tea.ProgramOpt
 
 	forceChange, err := s.store.MustChangePassword(username)
 	if err != nil {
-		log.Printf("error checking password change for %q: %v", username, err)
+		slog.Error("password change check failed", "user", username, "err", err)
 		forceChange = false
 	}
 
 	renderer := bubbletea.MakeRenderer(sshSession)
-	model := tui.New(username, s.sites, s.pool, s.store, s.logDir, forceChange, renderer)
+	model := tui.New(username, s.sites, s.lock, s.store, s.logDir, forceChange, renderer)
 
 	return model, []tea.ProgramOption{tea.WithAltScreen()}
 }

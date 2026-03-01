@@ -69,24 +69,21 @@ func (d siteDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 
 // MenuModel is the site selection view.
 type MenuModel struct {
-	list       list.Model
-	sites      []config.Site
-	pool       *modem.Pool
-	username   string
-	freePorts  int
-	totalPorts int
-	sipInfo    SIPInfo
-	theme      Theme
+	list     list.Model
+	sites    []config.Site
+	lock     *modem.DeviceLock
+	username string
+	sipInfo  SIPInfo
+	theme    Theme
 }
 
 // NewMenuModel creates the site selection menu.
-func NewMenuModel(sites []config.Site, username string, pool *modem.Pool, width, height int, theme Theme) MenuModel {
-	free, total := pool.Available()
-	active := pool.ActiveSites()
+func NewMenuModel(sites []config.Site, username string, lock *modem.DeviceLock, width, height int, theme Theme) MenuModel {
+	activeSite := lock.ActiveSite()
 
 	items := make([]list.Item, len(sites))
 	for i, s := range sites {
-		items[i] = siteItem{site: s, index: i, active: active[s.Name]}
+		items[i] = siteItem{site: s, index: i, active: s.Name == activeSite}
 	}
 
 	l := list.New(items, siteDelegate{theme: theme}, width, height-4)
@@ -97,13 +94,11 @@ func NewMenuModel(sites []config.Site, username string, pool *modem.Pool, width,
 	l.SetShowHelp(false)
 
 	return MenuModel{
-		list:       l,
-		sites:      sites,
-		pool:       pool,
-		username:   username,
-		freePorts:  free,
-		totalPorts: total,
-		theme:      theme,
+		list:     l,
+		sites:    sites,
+		lock:     lock,
+		username: username,
+		theme:    theme,
 	}
 }
 
@@ -150,25 +145,28 @@ func (m MenuModel) View() string {
 	// Status bar
 	var parts []string
 
-	// SIP status with color and trunk detail
-	switch m.sipInfo.Status {
-	case SIPRegistered:
-		sipText := "● " + m.sipInfo.Trunk
-		if m.sipInfo.Server != "" {
-			sipText += " → " + m.sipInfo.Server
-		}
-		parts = append(parts, m.theme.SuccessStyle.Render(sipText))
-	case SIPUnregistered:
-		sipText := "● SIP not registered"
-		if m.sipInfo.Trunk != "" {
-			sipText = "● " + m.sipInfo.Trunk + " not registered"
-		}
-		parts = append(parts, m.theme.ErrorStyle.Render(sipText))
-	default:
-		parts = append(parts, m.theme.LabelStyle.Render("○ SIP checking..."))
+	// 1. slmodemd health
+	if m.sipInfo.ModemReady {
+		parts = append(parts, m.theme.SuccessStyle.Render("● SLMODEMD"))
+	} else {
+		parts = append(parts, m.theme.ErrorStyle.Render("● SLMODEMD DOWN"))
 	}
 
-	parts = append(parts, m.theme.LabelStyle.Render(fmt.Sprintf("%d/%d ports", m.freePorts, m.totalPorts)))
+	// 2. d-modem health
+	if m.sipInfo.DModemReady {
+		parts = append(parts, m.theme.SuccessStyle.Render("● D-MODEM"))
+	} else {
+		parts = append(parts, m.theme.ErrorStyle.Render("● D-MODEM DOWN"))
+	}
+
+	// 3. Telnyx health
+	if m.sipInfo.Status == SIPRegistered {
+		parts = append(parts, m.theme.SuccessStyle.Render("● TELNYX"))
+	} else {
+		parts = append(parts, m.theme.ErrorStyle.Render("● TELNYX DOWN"))
+	}
+
+	// User info
 	parts = append(parts, m.theme.LabelStyle.Render(m.username))
 	parts = append(parts, m.theme.LabelStyle.Render("enter connect · q quit"))
 
@@ -178,12 +176,11 @@ func (m MenuModel) View() string {
 
 // refreshItems updates the list items with current active status.
 func (m *MenuModel) refreshItems() {
-	active := m.pool.ActiveSites()
-	m.freePorts, m.totalPorts = m.pool.Available()
+	activeSite := m.lock.ActiveSite()
 
 	items := make([]list.Item, len(m.sites))
 	for i, s := range m.sites {
-		items[i] = siteItem{site: s, index: i, active: active[s.Name]}
+		items[i] = siteItem{site: s, index: i, active: s.Name == activeSite}
 	}
 	m.list.SetItems(items)
 }
