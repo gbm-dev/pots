@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"log/slog"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/gbm-dev/pots/internal/auth"
@@ -169,8 +171,11 @@ func (m Model) updateDialing(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateConnected(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg.(type) {
+	switch msg := msg.(type) {
 	case TerminalDoneMsg:
+		if msg.Err != nil {
+			slog.Info("terminal session ended", "err", msg.Err)
+		}
 		return m.returnToMenu()
 	}
 	return m, nil

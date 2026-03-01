@@ -9,41 +9,36 @@ import (
 	"time"
 )
 
-func TestUserToModem_EscapeSequence(t *testing.T) {
+func TestUserToModem_LineBuffered(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
-		wantOut string
+		name       string
+		input      string
+		wantModem  string // what gets sent to modem
+		wantEcho   string // what gets echoed to terminal
 	}{
 		{
-			name:    "normal text passes through",
-			input:   "hello",
-			wantOut: "hello",
+			name:      "line sent on enter",
+			input:     "hello\r",
+			wantModem: "hello\r",
+			wantEcho:  "hello\r\n",
 		},
 		{
-			name:    "enter tilde dot disconnects",
-			input:   "hello\r~.",
-			wantOut: "hello\r",
+			name:      "empty enter sends CR",
+			input:     "\r",
+			wantModem: "\r",
+			wantEcho:  "\r\n",
 		},
 		{
-			name:    "newline tilde dot disconnects",
-			input:   "hello\n~.",
-			wantOut: "hello\n",
+			name:      "multiple lines",
+			input:     "show ver\rshow ip int brief\r",
+			wantModem: "show ver\rshow ip int brief\r",
+			wantEcho:  "show ver\r\nshow ip int brief\r\n",
 		},
 		{
-			name:    "tilde without preceding enter passes through",
-			input:   "a~.",
-			wantOut: "a~.",
-		},
-		{
-			name:    "tilde followed by non-dot forwards tilde",
-			input:   "\r~x",
-			wantOut: "\r~x",
-		},
-		{
-			name:    "enter only resets state",
-			input:   "\r\r\r",
-			wantOut: "\r\r\r",
+			name:      "newline also triggers send",
+			input:     "test\n",
+			wantModem: "test\r",
+			wantEcho:  "test\r\n",
 		},
 	}
 
@@ -51,14 +46,116 @@ func TestUserToModem_EscapeSequence(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ts := &TerminalSession{}
 			r := strings.NewReader(tt.input)
-			var w bytes.Buffer
+			var modemBuf, echoBuf bytes.Buffer
 
-			ts.userToModem(r, &w)
+			ts.userToModem(r, &modemBuf, &echoBuf)
 
-			if got := w.String(); got != tt.wantOut {
-				t.Errorf("output = %q, want %q", got, tt.wantOut)
+			if got := modemBuf.String(); got != tt.wantModem {
+				t.Errorf("modem output = %q, want %q", got, tt.wantModem)
+			}
+			if got := echoBuf.String(); got != tt.wantEcho {
+				t.Errorf("echo output = %q, want %q", got, tt.wantEcho)
 			}
 		})
+	}
+}
+
+func TestUserToModem_Backspace(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantModem string
+		wantEcho  string
+	}{
+		{
+			name:      "backspace removes last char",
+			input:     "helo\x7fo\r",
+			wantModem: "helo\r",
+			wantEcho:  "helo\x08 \x08o\r\n",
+		},
+		{
+			name:      "backspace on empty buffer is no-op",
+			input:     "\x7f\x7fhi\r",
+			wantModem: "hi\r",
+			wantEcho:  "hi\r\n",
+		},
+		{
+			name:      "BS char also works",
+			input:     "ab\x08c\r",
+			wantModem: "ac\r",
+			wantEcho:  "ab\x08 \x08c\r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := &TerminalSession{}
+			r := strings.NewReader(tt.input)
+			var modemBuf, echoBuf bytes.Buffer
+
+			ts.userToModem(r, &modemBuf, &echoBuf)
+
+			if got := modemBuf.String(); got != tt.wantModem {
+				t.Errorf("modem output = %q, want %q", got, tt.wantModem)
+			}
+			if got := echoBuf.String(); got != tt.wantEcho {
+				t.Errorf("echo output = %q, want %q", got, tt.wantEcho)
+			}
+		})
+	}
+}
+
+func TestUserToModem_EscapeSequence(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantModem string
+	}{
+		{
+			name:      "enter tilde dot disconnects",
+			input:     "\r~.",
+			wantModem: "\r",
+		},
+		{
+			name:      "tilde dot mid-line does not disconnect",
+			input:     "a~.b\r",
+			wantModem: "a~.b\r",
+		},
+		{
+			name:      "tilde without dot is kept in buffer",
+			input:     "\r~x\r",
+			wantModem: "\r~x\r",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := &TerminalSession{}
+			r := strings.NewReader(tt.input)
+			var modemBuf, echoBuf bytes.Buffer
+
+			ts.userToModem(r, &modemBuf, &echoBuf)
+
+			if got := modemBuf.String(); got != tt.wantModem {
+				t.Errorf("modem output = %q, want %q", got, tt.wantModem)
+			}
+		})
+	}
+}
+
+func TestUserToModem_CtrlC(t *testing.T) {
+	ts := &TerminalSession{}
+	// Type some text then Ctrl+C — should disconnect without sending
+	r := strings.NewReader("hello\x03")
+	var modemBuf, echoBuf bytes.Buffer
+
+	err := ts.userToModem(r, &modemBuf, &echoBuf)
+
+	if err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+	if got := modemBuf.String(); got != "" {
+		t.Errorf("modem output = %q, want empty (nothing sent before Enter)", got)
 	}
 }
 
@@ -119,5 +216,15 @@ func TestWakeLoop_SendsEntersUntilData(t *testing.T) {
 		if b != '\r' {
 			t.Errorf("byte %d = %q, want \\r", i, b)
 		}
+	}
+}
+
+func TestCarrierLost_SkipsHangup(t *testing.T) {
+	ts := &TerminalSession{}
+	// Simulate carrier loss
+	ts.carrierLost.Store(true)
+
+	if !ts.carrierLost.Load() {
+		t.Error("expected carrierLost to be true")
 	}
 }

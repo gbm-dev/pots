@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -15,6 +16,8 @@ import (
 // premature local TIMEOUT.
 const dialTimeout = 125 * time.Second
 const resetTimeout = 5 * time.Second
+const maxRetries = 3
+const retryDelay = 2 * time.Second
 
 // DialingModel shows connection progress with a spinner.
 type DialingModel struct {
@@ -124,8 +127,13 @@ func (m DialingModel) deviceDisplay() string {
 	return m.device
 }
 
-// acquireAndDial runs the modem acquire → reset → configure → dial sequence,
-// sending status updates back to the TUI at each step.
+// retryable returns true for dial results that may succeed on retry.
+func retryable(r modem.DialResult) bool {
+	return r == modem.ResultNoCarrier || r == modem.ResultTimeout
+}
+
+// acquireAndDial runs the modem acquire → reset → configure → dial sequence
+// with automatic retries on transient failures (NO CARRIER, TIMEOUT).
 func (m DialingModel) acquireAndDial() tea.Cmd {
 	return func() tea.Msg {
 		// Step 1: Acquire device
@@ -134,44 +142,68 @@ func (m DialingModel) acquireAndDial() tea.Cmd {
 			return ErrorMsg{Err: fmt.Errorf("modem busy: %w", err), Context: "acquire"}
 		}
 
-		// Step 2: Open device
-		mdm, err := modem.Open(dev)
-		if err != nil {
-			m.lock.Release()
-			return ErrorMsg{Err: fmt.Errorf("failed to open %s: %w", dev, err), Context: "open"}
-		}
+		var lastResp modem.DialResponse
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			if attempt > 1 {
+				time.Sleep(retryDelay)
+			}
 
-		// Step 3: Initialize modem (ATE0 + ATZ)
-		if err := mdm.Init(resetTimeout); err != nil {
-			mdm.Close()
-			m.lock.Release()
-			return ErrorMsg{Err: fmt.Errorf("modem init failed: %w", err), Context: "init"}
-		}
+			// Open device
+			mdm, err := modem.Open(dev)
+			if err != nil {
+				m.lock.Release()
+				return ErrorMsg{Err: fmt.Errorf("failed to open %s: %w", dev, err), Context: "open"}
+			}
 
-		// Step 4: Send pre-dial configuration commands if any
-		if len(m.site.ModemInit) > 0 {
-			if err := mdm.Configure(m.site.ModemInit, resetTimeout); err != nil {
+			// Initialize modem (ATE0 + ATZ)
+			if err := mdm.Init(resetTimeout); err != nil {
 				mdm.Close()
 				m.lock.Release()
-				return ErrorMsg{Err: fmt.Errorf("modem configure failed: %w", err), Context: "configure"}
+				return ErrorMsg{Err: fmt.Errorf("modem init failed: %w", err), Context: "init"}
+			}
+
+			// Send pre-dial configuration commands if any
+			if len(m.site.ModemInit) > 0 {
+				if err := mdm.Configure(m.site.ModemInit, resetTimeout); err != nil {
+					mdm.Close()
+					m.lock.Release()
+					return ErrorMsg{Err: fmt.Errorf("modem configure failed: %w", err), Context: "configure"}
+				}
+			}
+
+			// Dial
+			resp, err := mdm.Dial(m.site.Phone, dialTimeout)
+			if err != nil {
+				mdm.Hangup()
+				mdm.Close()
+				m.lock.Release()
+				return ErrorMsg{Err: fmt.Errorf("dial error: %w", err), Context: "dial"}
+			}
+
+			if resp.Result == modem.ResultConnect {
+				return DialResultMsg{Result: resp.Result, Transcript: resp.Transcript, Modem: mdm, Device: dev}
+			}
+
+			lastResp = resp
+			slog.Info("dial failed, checking retry", "result", resp.Result, "attempt", attempt, "max", maxRetries)
+
+			// Clean up before potential retry
+			mdm.Hangup()
+			mdm.Close()
+
+			// Non-retryable results: fail immediately
+			if !retryable(resp.Result) {
+				m.lock.Release()
+				return DialResultMsg{Result: resp.Result, Transcript: resp.Transcript, Device: dev}
+			}
+
+			if attempt < maxRetries {
+				slog.Info("retrying dial", "attempt", attempt+1, "max", maxRetries)
 			}
 		}
 
-		// Step 5: Dial
-		resp, err := mdm.Dial(m.site.Phone, dialTimeout)
-		if err != nil {
-			mdm.Hangup()
-			mdm.Close()
-			m.lock.Release()
-			return ErrorMsg{Err: fmt.Errorf("dial error: %w", err), Context: "dial"}
-		}
-
-		if resp.Result != modem.ResultConnect {
-			mdm.Hangup()
-			mdm.Close()
-			m.lock.Release()
-		}
-
-		return DialResultMsg{Result: resp.Result, Transcript: resp.Transcript, Modem: mdm, Device: dev}
+		// All retries exhausted
+		m.lock.Release()
+		return DialResultMsg{Result: lastResp.Result, Transcript: lastResp.Transcript, Device: dev}
 	}
 }

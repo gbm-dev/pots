@@ -13,7 +13,8 @@ import (
 )
 
 // TerminalSession is a tea.ExecCommand that runs raw bidirectional I/O
-// between the user's terminal and the modem, with ~. escape detection.
+// between the user's terminal and the modem, with line-buffered input
+// and ~. escape detection.
 type TerminalSession struct {
 	modem    *modem.Modem
 	device   string
@@ -24,6 +25,8 @@ type TerminalSession struct {
 
 	stdin  io.Reader // set by tea.Exec via SetStdin
 	stdout io.Writer // set by tea.Exec via SetStdout
+
+	carrierLost atomic.Bool
 }
 
 // NewTerminalSession creates a terminal pass-through session.
@@ -60,7 +63,7 @@ func (t *TerminalSession) Run() error {
 	}
 
 	// Print connection banner
-	banner := fmt.Sprintf("\r\n*** CONNECTED to %s — Press Enter then ~. to disconnect ***\r\n\r\n", t.siteName)
+	banner := fmt.Sprintf("\r\n*** CONNECTED to %s — Type commands, press Enter to send, ~. to disconnect, Ctrl+C to abort ***\r\n\r\n", t.siteName)
 	fmt.Fprint(stdout, banner)
 
 	// Modem→user: tee to logger, track when we first receive data
@@ -82,15 +85,16 @@ func (t *TerminalSession) Run() error {
 				}
 			}
 			if err != nil {
+				t.carrierLost.Store(true)
 				done <- err
 				return
 			}
 		}
 	}()
 
-	// User → modem (with ~. escape detection)
+	// User → modem (line-buffered with ~. escape and Ctrl+C)
 	go func() {
-		done <- t.userToModem(stdin, rwc)
+		done <- t.userToModem(stdin, rwc, stdout)
 	}()
 
 	// Send Enter every 2s until remote responds, then stop.
@@ -130,10 +134,13 @@ func (t *TerminalSession) SetStdout(w io.Writer) { t.stdout = w }
 // SetStderr is required by tea.ExecCommand.
 func (t *TerminalSession) SetStderr(w io.Writer) {}
 
-// userToModem reads from user and writes to modem, detecting ~. escape.
-func (t *TerminalSession) userToModem(r io.Reader, w io.Writer) error {
+// userToModem reads from user with line buffering: characters are echoed
+// locally and accumulated in a buffer, then sent to the modem on Enter.
+// Supports backspace editing, ~. escape sequence, and Ctrl+C disconnect.
+func (t *TerminalSession) userToModem(r io.Reader, w io.Writer, echo io.Writer) error {
 	buf := make([]byte, 1)
-	var prevWasEnter, prevWasTilde bool
+	var lineBuf []byte
+	var prevWasEnter bool
 
 	for {
 		n, err := r.Read(buf)
@@ -146,28 +153,53 @@ func (t *TerminalSession) userToModem(r io.Reader, w io.Writer) error {
 
 		b := buf[0]
 
-		// Escape sequence: Enter, ~, .
-		if prevWasTilde && b == '.' {
-			return nil // disconnect
-		}
-		if prevWasEnter && b == '~' {
-			prevWasTilde = true
-			prevWasEnter = false
-			continue // Don't forward ~ yet
+		// Ctrl+C: disconnect immediately
+		if b == 0x03 {
+			return nil
 		}
 
-		// If we had a pending ~ that wasn't followed by ., forward it
-		if prevWasTilde {
-			w.Write([]byte{'~'})
-			prevWasTilde = false
+		// Backspace (DEL or BS): remove last char from buffer
+		if b == 0x7f || b == 0x08 {
+			if len(lineBuf) > 0 {
+				lineBuf = lineBuf[:len(lineBuf)-1]
+				// Erase character on terminal: backspace, space, backspace
+				echo.Write([]byte{0x08, ' ', 0x08})
+			}
+			continue
 		}
 
-		prevWasEnter = (b == '\r' || b == '\n')
-		prevWasTilde = false
+		// Enter: send buffered line to modem
+		if b == '\r' || b == '\n' {
+			// Check for ~. escape: line buffer starts with ~.
+			if prevWasEnter && len(lineBuf) == 2 && lineBuf[0] == '~' && lineBuf[1] == '.' {
+				return nil // disconnect
+			}
 
-		if _, err := w.Write(buf[:n]); err != nil {
-			return err
+			// Echo the newline locally
+			echo.Write([]byte("\r\n"))
+
+			// Send buffered line + CR to modem
+			if len(lineBuf) > 0 {
+				line := append(lineBuf, '\r')
+				if _, werr := w.Write(line); werr != nil {
+					return werr
+				}
+			} else {
+				// Empty enter: just send CR
+				if _, werr := w.Write([]byte{'\r'}); werr != nil {
+					return werr
+				}
+			}
+
+			lineBuf = lineBuf[:0]
+			prevWasEnter = true
+			continue
 		}
+
+		// Regular character: add to buffer and echo locally
+		lineBuf = append(lineBuf, b)
+		echo.Write([]byte{b})
+		prevWasEnter = false
 	}
 }
 
@@ -175,7 +207,11 @@ func (t *TerminalSession) cleanup() {
 	if t.logger != nil {
 		t.logger.Close()
 	}
-	t.modem.Hangup()
+	if t.carrierLost.Load() {
+		slog.Info("carrier already lost, skipping hangup")
+	} else {
+		t.modem.Hangup()
+	}
 	t.modem.Close()
 	t.lock.Release()
 }
