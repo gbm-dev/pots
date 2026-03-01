@@ -32,7 +32,6 @@ RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-in
 # Build and Install Asterisk 22 LTS (Minimal PJSIP only)
 # This matches our verified scripts/install-asterisk.sh process.
 WORKDIR /usr/local/src
-RUN rm -rf /usr/lib/asterisk/modules
 RUN wget -q "http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-22-current.tar.gz" \
     && tar xzf asterisk-22-current.tar.gz \
     && rm asterisk-22-current.tar.gz \
