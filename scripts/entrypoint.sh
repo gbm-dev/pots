@@ -74,8 +74,47 @@ echo "Starting Asterisk..."
 # Clear old database if it exists to prevent Stasis init failure
 rm -f /var/lib/asterisk/astdb.sqlite3 || true
 
+# Ensure required runtime directories exist
+mkdir -p /var/run/asterisk /var/log/asterisk /var/lib/asterisk /var/spool/asterisk
+
+# Diagnostic: Verify modules directory
+REAL_MOD_DIR=""
+for dir in /usr/lib/asterisk/modules /usr/lib64/asterisk/modules /usr/lib/x86_64-linux-gnu/asterisk/modules; do
+    if [[ -d "$dir" ]] && [[ -n "$(ls -A "$dir" 2>/dev/null)" ]]; then
+        REAL_MOD_DIR="$dir"
+        break
+    fi
+done
+
+if [[ -n "$REAL_MOD_DIR" ]]; then
+    echo "  Found Asterisk modules in ${REAL_MOD_DIR}"
+    # Update asterisk.conf to use the correct module directory if it differs
+    sed -i "s|astmoddir =>.*|astmoddir => ${REAL_MOD_DIR}|" /etc/asterisk/asterisk.conf
+else
+    echo "ERROR: Could not find Asterisk modules directory!"
+    exit 1
+fi
+
+# Diagnostic: Verify binary and libraries
+if ! command -v asterisk >/dev/null 2>&1; then
+    echo "ERROR: asterisk binary not found in PATH!"
+    exit 1
+fi
+
+if ! ldd "$(command -v asterisk)" >/dev/null 2>&1; then
+    echo "WARNING: Could not run ldd on asterisk binary."
+else
+    MISSING_LIBS=$(ldd "$(command -v asterisk)" | grep "not found" || true)
+    if [[ -n "${MISSING_LIBS}" ]]; then
+        echo "ERROR: Missing libraries for Asterisk:"
+        echo "${MISSING_LIBS}"
+        exit 1
+    fi
+fi
+
 # Start Asterisk with explicit config path and high verbosity
-# Use -c for console mode, -f to keep in foreground, -vvv for verbosity
+# Use -f to stay in foreground (non-daemon), -vvv for verbosity
+# Redirect to startup.log for capturing early failures
 asterisk -f -C /etc/asterisk/asterisk.conf -vvv >/var/log/asterisk/startup.log 2>&1 &
 ASTERISK_PID=$!
 
